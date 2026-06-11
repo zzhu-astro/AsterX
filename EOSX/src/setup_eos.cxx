@@ -1,23 +1,26 @@
 #include <cctk.h>
 #include <cctk_Arguments.h>
 #include <cctk_Parameters.h>
+#include <loop_device.hxx>
 
 #include <AMReX.H>
 
 #include <setup_eos.hxx>
 
+#include <cmath>
 #include <mpi.h>
 #include <hdf5.h>
 
 #include "eos_3p_tabulated3d/eos_readtable_scollapse.hxx"
 #include "eos_3p_tabulated3d/eos_readtable_compose.hxx"
+#include "lk_const.hxx"
 
 namespace EOSX {
 
 using namespace amrex;
 
 enum class eos_1param { Polytropic, PWPolytropic };
-enum class eos_3param { IdealGas, Hybrid, Tabulated };
+enum class eos_3param { IdealGas, RadIdealGas, Hybrid, Tabulated };
 
 // initial data EOS
 eos_1p_polytropic *global_eos_1p_poly = nullptr;
@@ -25,11 +28,24 @@ eos_1p_piecewise_polytropic *global_eos_1p_pwpoly = nullptr;
 
 // evolution EOS
 eos_3p_idealgas *global_eos_3p_ig = nullptr;
+eos_3p_rad_idealgas *global_eos_3p_rad_ig = nullptr;
 eos_3p_hybrid_poly *global_eos_3p_hyb_poly = nullptr;
 eos_3p_hybrid_pwpoly *global_eos_3p_hyb_pwpoly = nullptr;
 eos_3p_tabulated3d *global_eos_3p_tab3d = nullptr;
 
 enum class eos_table_format { StellarCollapse = 0, Compose = 1 };
+
+namespace {
+
+static CCTK_REAL rad_a_constant_from_leakage_units() {
+  if (!lkx_constants::host_constants) {
+    CCTK_ERROR("LeakageBaseX runtime constants were not initialized before "
+               "EOSX::Rad_idealgas setup.");
+  }
+  return lkx_constants::radiation_constant_cu();
+}
+
+} // namespace
 
 static inline eos_table_format
 detect_table_format_rank0(const std::string &filename) {
@@ -147,6 +163,8 @@ extern "C" void EOSX_Setup_EOS(CCTK_ARGUMENTS) {
 
   if (CCTK_EQUALS(evolution_eos, "IdealGas")) {
     eos_3p_type = eos_3param::IdealGas;
+  } else if (CCTK_EQUALS(evolution_eos, "Rad_idealgas")) {
+    eos_3p_type = eos_3param::RadIdealGas;
   } else if (CCTK_EQUALS(evolution_eos, "Hybrid")) {
     eos_3p_type = eos_3param::Hybrid;
   } else if (CCTK_EQUALS(evolution_eos, "Tabulated3d")) {
@@ -163,6 +181,23 @@ extern "C" void EOSX_Setup_EOS(CCTK_ARGUMENTS) {
     assert(global_eos_3p_ig);
     new (global_eos_3p_ig) eos_3p_idealgas;
     global_eos_3p_ig->init(gl_gamma, particle_mass, rgeps, rgrho, rgye);
+    break;
+  }
+  case eos_3param::RadIdealGas: {
+    CCTK_INFO("Setting evolution EOS to Radiation Ideal Gas");
+    if (!CCTK_IsThornActive("LeakageBaseX")) {
+      CCTK_ERROR("EOSX::evolution_eos = \"Rad_idealgas\" requires active "
+                 "LeakageBaseX.");
+    }
+    const CCTK_REAL arad_code = rad_a_constant_from_leakage_units();
+    const CCTK_REAL rad_factor = lkx_constants::runtime_constants().rad_factor;
+    global_eos_3p_rad_ig =
+        (eos_3p_rad_idealgas *)The_Managed_Arena()->alloc(
+            sizeof *global_eos_3p_rad_ig);
+    assert(global_eos_3p_rad_ig);
+    new (global_eos_3p_rad_ig) eos_3p_rad_idealgas;
+    global_eos_3p_rad_ig->init(gl_gamma, arad_code, rad_factor, rgeps, rgrho,
+                               rgye);
     break;
   }
   case eos_3param::Hybrid: {

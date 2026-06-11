@@ -4,14 +4,17 @@
 #include <cctk_Arguments.h>
 #include <cctk_Parameters.h>
 #include <cmath>
+#include <type_traits>
 
 #include "c2p.hxx"
 #include "c2p_1DEntropy.hxx"
 #include "c2p_1DPalenzuela.hxx"
 #include "c2p_1DRePrimAnd.hxx"
 #include "c2p_2DNoble.hxx"
+#include "c2p_Noble_rad.hxx"
 
 #include "aster_utils.hxx"
+#include "rad_eos_utils.hxx"
 #include "setup_eos.hxx"
 
 namespace AsterX {
@@ -21,9 +24,9 @@ using namespace EOSX;
 using namespace Con2PrimFactory;
 using namespace AsterUtils;
 
-enum class eos_3param { IdealGas, Hybrid, Tabulated };
-enum class c2p_first_t { None, Noble, RePrimAnd, Palenzuela, Entropy };
-enum class c2p_second_t { None, Noble, RePrimAnd, Palenzuela, Entropy };
+enum class eos_3param { IdealGas, RadIdealGas, Hybrid, Tabulated };
+enum class c2p_first_t { None, Noble, NobleRad, RePrimAnd, Palenzuela, Entropy };
+enum class c2p_second_t { None, Noble, NobleRad, RePrimAnd, Palenzuela, Entropy };
 
 enum C2PFlag : CCTK_INT {
   C2P_INIT = 0,    // initial value
@@ -46,6 +49,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
   if (CCTK_EQUALS(c2p_prime, "Noble")) {
     c2p_fir = c2p_first_t::Noble;
+  } else if (CCTK_EQUALS(c2p_prime, "Noble_rad")) {
+    c2p_fir = c2p_first_t::NobleRad;
   } else if (CCTK_EQUALS(c2p_prime, "RePrimAnd")) {
     c2p_fir = c2p_first_t::RePrimAnd;
   } else if (CCTK_EQUALS(c2p_prime, "Palenzuela")) {
@@ -60,6 +65,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
   if (CCTK_EQUALS(c2p_second, "Noble")) {
     c2p_sec = c2p_second_t::Noble;
+  } else if (CCTK_EQUALS(c2p_second, "Noble_rad")) {
+    c2p_sec = c2p_second_t::NobleRad;
   } else if (CCTK_EQUALS(c2p_second, "RePrimAnd")) {
     c2p_sec = c2p_second_t::RePrimAnd;
   } else if (CCTK_EQUALS(c2p_second, "Palenzuela")) {
@@ -75,9 +82,80 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
   const vec<GF3D2<const CCTK_REAL>, dim> gf_beta{betax, betay, betaz};
 
   const smat<GF3D2<const CCTK_REAL>, 3> gf_g{gxx, gxy, gxz, gyy, gyz, gzz};
+  const GF3D2<const CCTK_REAL> optd = [&]() {
+    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+      return leakage_optd_gf(cctkGH);
+    } else {
+      return GF3D2<const CCTK_REAL>{rho};
+    }
+  }();
 
   const auto c2p_impl = [=] CCTK_DEVICE(
                             const PointDesc &p) CCTK_ATTRIBUTE_ALWAYS_INLINE {
+    CCTK_REAL optd_local = CCTK_REAL(0.0);
+    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+      optd_local = optd(p.I);
+    }
+    const auto press_from_rho_temp =
+        [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
+            const CCTK_REAL ye_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->press_from_rho_temp_ye_tau(rho_, temp_, ye_,
+                                                      optd_local);
+          } else {
+            return eos_3p->press_from_rho_temp_ye(rho_, temp_, ye_);
+          }
+        };
+    const auto eps_from_rho_temp =
+        [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
+            const CCTK_REAL ye_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->eps_from_rho_temp_ye_tau(rho_, temp_, ye_,
+                                                    optd_local);
+          } else {
+            return eos_3p->eps_from_rho_temp_ye(rho_, temp_, ye_);
+          }
+        };
+    const auto eps_from_rho_press =
+        [&](const CCTK_REAL rho_, const CCTK_REAL press_,
+            const CCTK_REAL ye_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->eps_from_rho_press_ye_tau(rho_, press_, ye_,
+                                                     optd_local);
+          } else {
+            return eos_3p->eps_from_rho_press_ye(rho_, press_, ye_);
+          }
+        };
+    const auto temp_from_rho_eps =
+        [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
+            const CCTK_REAL ye_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->temp_from_rho_eps_ye_tau(rho_, eps_, ye_,
+                                                    optd_local);
+          } else {
+            return eos_3p->temp_from_rho_eps_ye(rho_, eps_, ye_);
+          }
+        };
+    const auto press_from_rho_eps =
+        [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
+            const CCTK_REAL ye_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->press_from_rho_eps_ye_tau(rho_, eps_, ye_,
+                                                     optd_local);
+          } else {
+            return eos_3p->press_from_rho_eps_ye(rho_, eps_, ye_);
+          }
+        };
+    const auto entropy_from_rho_eps =
+        [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
+            const CCTK_REAL ye_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->kappa_from_rho_eps_ye_tau(rho_, eps_, ye_,
+                                                     optd_local);
+          } else {
+            return eos_3p->kappa_from_rho_eps_ye(rho_, eps_, ye_);
+          }
+        };
     // Note that HydroBaseX gfs are NaN when entering this loop due
     // explicit dependence on conservatives from
     // AsterX -> dependents tag
@@ -104,19 +182,19 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
         press_atm = (radial_distance > r_atmo)
                         ? (p_atmo * pow(r_atmo / radial_distance, n_press_atmo))
                         : p_atmo;
-        press_atm = std::max(eos_3p->press_from_rho_temp_ye(
-                                 rho_atm, eos_3p->rgtemp.min, Ye_atmo),
-                             press_atm);
-        eps_atm = eos_3p->eps_from_rho_press_ye(rho_atm, press_atm, Ye_atmo);
-        temp_atm = eos_3p->temp_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
+        press_atm = std::max(
+            press_from_rho_temp(rho_atm, eos_3p->rgtemp.min, Ye_atmo),
+            press_atm);
+        eps_atm = eps_from_rho_press(rho_atm, press_atm, Ye_atmo);
+        temp_atm = temp_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
       } else {
         temp_atm = (radial_distance > r_atmo)
                        ? (t_atmo * pow(r_atmo / radial_distance, n_temp_atmo))
                        : t_atmo;
         temp_atm = std::max(eos_3p->rgtemp.min, temp_atm);
         // temp_atm = max(temp_atm, eos_3p->interptable->xmin<1>());
-        press_atm = eos_3p->press_from_rho_temp_ye(rho_atm, temp_atm, Ye_atmo);
-        eps_atm = eos_3p->eps_from_rho_temp_ye(rho_atm, temp_atm, Ye_atmo);
+        press_atm = press_from_rho_temp(rho_atm, temp_atm, Ye_atmo);
+        eps_atm = eps_from_rho_temp(rho_atm, temp_atm, Ye_atmo);
         // eps_atm should be kept consistent with temp_atm, so we do not use
         // the setting below
         // eps_atm =
@@ -127,15 +205,15 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
       const CCTK_REAL gm1 = eos_1p->gm1_from_rho(rho_atm);
       temp_atm = eos_1p->temp_from_gm1(gm1);
       temp_atm = std::max(eos_3p->rgtemp.min, temp_atm);
-      eps_atm = eos_3p->eps_from_rho_temp_ye(rho_atm, temp_atm, Ye_atmo);
+      eps_atm = eps_from_rho_temp(rho_atm, temp_atm, Ye_atmo);
       // eps_atm should be kept consistent with temp_atm, so we do not use
       // the setting below
       // eps_atm =
       //    std::min(std::max(eos_3p->rgeps.min, eps_atm), eos_3p->rgeps.max);
-      press_atm = eos_3p->press_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
+      press_atm = press_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
     }
     CCTK_REAL entropy_atm =
-        eos_3p->kappa_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
+        entropy_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
     const CCTK_REAL rho_atmo_cut = rho_atm * (1 + atmo_tol);
     atmosphere atmo(rho_atm, eps_atm, Ye_atmo, press_atm, temp_atm, entropy_atm,
                     rho_atmo_cut);
@@ -144,6 +222,12 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
     // Construct Noble c2p object:
     c2p_2DNoble c2p_Noble(eos_3p, atmo, max_iter, c2p_tol, alp_thresh, vw_lim,
+                          B_lim, rho_BH, eps_BH, vwlim_BH, sigma_max,
+                          inv_beta_max, Ye_lenient, use_z, use_temperature,
+                          use_press_atmo, soft_root_convergence,
+                          soft_root_width_factor);
+
+    c2p_Noble_rad c2p_Rad(eos_3p, atmo, max_iter, c2p_tol, alp_thresh, vw_lim,
                           B_lim, rho_BH, eps_BH, vwlim_BH, sigma_max,
                           inv_beta_max, Ye_lenient, use_z, use_temperature,
                           use_press_atmo, soft_root_convergence,
@@ -224,11 +308,11 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
     prim_vars pv_seeds{saved_rho(p.I),
                        saved_eps(p.I),
                        saved_Ye(p.I),
-                       eos_3p->press_from_rho_eps_ye(
-                           saved_rho(p.I), saved_eps(p.I), saved_Ye(p.I)),
+                       press_from_rho_eps(saved_rho(p.I), saved_eps(p.I),
+                                          saved_Ye(p.I)),
                        temperature(p.I),
-                       eos_3p->kappa_from_rho_eps_ye(
-                           saved_rho(p.I), saved_eps(p.I), saved_Ye(p.I)),
+                       entropy_from_rho_eps(saved_rho(p.I), saved_eps(p.I),
+                                            saved_Ye(p.I)),
                        v_up,
                        wlor,
                        Bup};
@@ -259,7 +343,12 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
     if (excise) {
 
       if (mask_local != 1.0) {
-        c2p_Noble.bh_interior<EOSType, false>(eos_3p, pv_seeds, cv, glo);
+        if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+          c2p_Rad.bh_interior_tau<EOSType, false>(eos_3p, pv_seeds, cv, glo,
+                                                  optd_local);
+        } else {
+          c2p_Noble.bh_interior<EOSType, false>(eos_3p, pv_seeds, cv, glo);
+        }
         pv = pv_seeds;
         call_c2p = false;
       }
@@ -283,6 +372,15 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
       case c2p_first_t::Noble: {
         c2p_Noble.solve(eos_3p, pv, pv_seeds, cv, alp_avg, beta_avg, glo,
                         rep_first);
+        break;
+      }
+      case c2p_first_t::NobleRad: {
+        if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+          c2p_Rad.solve(eos_3p, pv, pv_seeds, cv, alp_avg, beta_avg, glo,
+                        optd_local, rep_first);
+        } else {
+          assert(0);
+        }
         break;
       }
       case c2p_first_t::RePrimAnd: {
@@ -319,6 +417,15 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
         case c2p_second_t::Noble: {
           c2p_Noble.solve(eos_3p, pv, pv_seeds, cv, alp_avg, beta_avg, glo,
                           rep_second);
+          break;
+        }
+        case c2p_second_t::NobleRad: {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            c2p_Rad.solve(eos_3p, pv, pv_seeds, cv, alp_avg, beta_avg, glo,
+                          optd_local, rep_second);
+          } else {
+            assert(0);
+          }
           break;
         }
         case c2p_second_t::RePrimAnd: {
@@ -386,7 +493,13 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
             if (mask_local != 1.0) {
               // Failure inside mask
-              c2p_Noble.bh_interior<EOSType, false>(eos_3p, pv_seeds, cv, glo);
+              if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+                c2p_Rad.bh_interior_tau<EOSType, false>(eos_3p, pv_seeds, cv,
+                                                        glo, optd_local);
+              } else {
+                c2p_Noble.bh_interior<EOSType, false>(eos_3p, pv_seeds, cv,
+                                                      glo);
+              }
               pv = pv_seeds;
             } else {
               // Failure outside, set to atmo
@@ -433,7 +546,13 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
           if (mask_local != 1.0) {
             // Failure inside mask
-            c2p_Noble.bh_interior<EOSType, false>(eos_3p, pv_seeds, cv, glo);
+            if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+              c2p_Rad.bh_interior_tau<EOSType, false>(eos_3p, pv_seeds, cv,
+                                                      glo, optd_local);
+            } else {
+              c2p_Noble.bh_interior<EOSType, false>(eos_3p, pv_seeds, cv,
+                                                    glo);
+            }
             pv = pv_seeds;
           } else {
             // Failure outside, set to atmo
@@ -448,7 +567,12 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
       // Inside mask, C2P success
       if ((mask_local != 1.0) && c2p_flag_local) {
-        c2p_Noble.bh_interior<EOSType, true>(eos_3p, pv, cv, glo);
+        if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+          c2p_Rad.bh_interior_tau<EOSType, true>(eos_3p, pv, cv, glo,
+                                                 optd_local);
+        } else {
+          c2p_Noble.bh_interior<EOSType, true>(eos_3p, pv, cv, glo);
+        }
       }
     }
 
@@ -522,12 +646,39 @@ extern "C" void AsterX_Con2Prim(CCTK_ARGUMENTS) {
     CCTK_ERROR("Tabulated3d does not support eps_from_rho_press_ye; set "
                "Con2PrimFactory::use_press_atmo = no.");
   }
+  if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
+      !(CCTK_EQUALS(c2p_prime, "Noble_rad") ||
+        CCTK_EQUALS(c2p_second, "Noble_rad"))) {
+    CCTK_ERROR("Rad_idealgas requires Con2PrimFactory::c2p_prime or "
+               "c2p_second to be \"Noble_rad\".");
+  }
+  if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
+      ((!CCTK_EQUALS(c2p_prime, "Noble_rad") &&
+        !CCTK_EQUALS(c2p_prime, "None")) ||
+       (!CCTK_EQUALS(c2p_second, "Noble_rad") &&
+        !CCTK_EQUALS(c2p_second, "None")))) {
+    CCTK_ERROR("Rad_idealgas only supports Con2PrimFactory::Noble_rad (or "
+               "\"None\") for c2p_prime/c2p_second.");
+  }
+  if (!CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
+      (CCTK_EQUALS(c2p_prime, "Noble_rad") ||
+       CCTK_EQUALS(c2p_second, "Noble_rad"))) {
+    CCTK_ERROR("Con2PrimFactory::Noble_rad requires "
+               "EOSX::evolution_eos = \"Rad_idealgas\".");
+  }
+  if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") && use_entropy_fix) {
+    CCTK_ERROR("AsterX::use_entropy_fix is not supported with "
+               "EOSX::evolution_eos = \"Rad_idealgas\" because the entropy "
+               "fallback C2P is not optical-depth aware.");
+  }
 
   // defining EOS objects
   eos_3param eos_3p_type;
 
   if (CCTK_EQUALS(evolution_eos, "IdealGas")) {
     eos_3p_type = eos_3param::IdealGas;
+  } else if (CCTK_EQUALS(evolution_eos, "Rad_idealgas")) {
+    eos_3p_type = eos_3param::RadIdealGas;
   } else if (CCTK_EQUALS(evolution_eos, "Hybrid")) {
     eos_3p_type = eos_3param::Hybrid;
   } else if (CCTK_EQUALS(evolution_eos, "Tabulated3d")) {
@@ -543,6 +694,13 @@ extern "C" void AsterX_Con2Prim(CCTK_ARGUMENTS) {
     auto eos_3p_ig = global_eos_3p_ig;
 
     AsterX_Con2Prim_typeEoS(CCTK_PASS_CTOC, eos_1p_poly, eos_3p_ig);
+    break;
+  }
+  case eos_3param::RadIdealGas: {
+    auto eos_1p_poly = global_eos_1p_poly;
+    auto eos_3p_rad_ig = global_eos_3p_rad_ig;
+
+    AsterX_Con2Prim_typeEoS(CCTK_PASS_CTOC, eos_1p_poly, eos_3p_rad_ig);
     break;
   }
   case eos_3param::Hybrid: {

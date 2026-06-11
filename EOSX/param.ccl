@@ -12,6 +12,7 @@ KEYWORD initial_data_eos "Name of active EOS for initial data"
 KEYWORD evolution_eos "Equation of state employed during evolution" STEERABLE=never
 { 
   "IdealGas" :: "Ideal Gas"
+  "Rad_idealgas" :: "Ideal Gas plus radiation pressure"
   "Hybrid" :: "Cold EOS plus thermal component" 
   "Tabulated3d" :: "EOS Tabulated in (rho, T, Ye)"
   "none" :: "No EOS available"

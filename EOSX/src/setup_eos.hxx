@@ -13,6 +13,7 @@
 
 #include "eos_3p.hxx"
 #include "eos_3p_idealgas/eos_3p_idealgas.hxx"
+#include "eos_3p_rad_idealgas/eos_3p_rad_idealgas.hxx"
 #include "eos_3p_hybrid/eos_3p_hybrid.hxx"
 #include "eos_3p_tabulated3d/eos_3p_tabulated3d.hxx"
 
@@ -24,6 +25,7 @@ extern eos_1p_piecewise_polytropic *global_eos_1p_pwpoly;
 
 // evolution EOS
 extern eos_3p_idealgas *global_eos_3p_ig;
+extern eos_3p_rad_idealgas *global_eos_3p_rad_ig;
 
 using eos_3p_hybrid_poly   = eos_3p_hybrid<eos_1p_polytropic>;
 using eos_3p_hybrid_pwpoly = eos_3p_hybrid<eos_1p_piecewise_polytropic>;

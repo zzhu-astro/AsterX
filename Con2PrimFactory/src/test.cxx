@@ -3,11 +3,15 @@
 #include <cctk.h>
 #include <cctk_Arguments.h>
 
+#include <cassert>
+#include <cmath>
+
 #include "c2p.hxx"
 #include "c2p_1DEntropy.hxx"
 #include "c2p_1DPalenzuela.hxx"
 #include "c2p_1DRePrimAnd.hxx"
 #include "c2p_2DNoble.hxx"
+#include "c2p_Noble_rad.hxx"
 
 #include "c2p_utils.hxx"
 
@@ -24,6 +28,32 @@ extern "C" void Con2PrimFactory_Test(CCTK_ARGUMENTS) {
 
   // Get local eos object
   auto eos_3p_ig = global_eos_3p_ig;
+  auto eos_3p_rad_ig = global_eos_3p_rad_ig;
+
+  if (!eos_3p_ig) {
+    if (eos_3p_rad_ig) {
+      CCTK_VINFO("Testing Rad_idealgas thermodynamics...");
+      const CCTK_REAL rho_test = 0.125;
+      const CCTK_REAL temp_test = 0.2;
+      const CCTK_REAL Ye_test = 0.5;
+      const CCTK_REAL press_tau0 = eos_3p_rad_ig->press_from_rho_temp_ye_tau(
+          rho_test, temp_test, Ye_test, 0.0);
+      const CCTK_REAL eps_tau0 = eos_3p_rad_ig->eps_from_rho_temp_ye_tau(
+          rho_test, temp_test, Ye_test, 0.0);
+      const CCTK_REAL press_tau1 = eos_3p_rad_ig->press_from_rho_temp_ye_tau(
+          rho_test, temp_test, Ye_test, 1.0);
+      const CCTK_REAL cs_tau1 = eos_3p_rad_ig->csnd_from_rho_temp_ye_tau(
+          rho_test, temp_test, Ye_test, 1.0);
+
+      assert(fabs(press_tau0 - rho_test * temp_test) <=
+             1.0e-12 * fmax(1.0, fabs(rho_test * temp_test)));
+      assert(fabs(eps_tau0 - temp_test / eos_3p_rad_ig->gm1) <=
+             1.0e-12 * fmax(1.0, fabs(temp_test / eos_3p_rad_ig->gm1)));
+      assert(press_tau1 >= press_tau0);
+      assert(isfinite(cs_tau1) && cs_tau1 >= 0.0 && cs_tau1 < 1.0);
+    }
+    return;
+  }
 
   // Set atmo values
   const CCTK_REAL rho_atmo = 1e-10;

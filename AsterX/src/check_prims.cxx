@@ -2,8 +2,10 @@
 #include <cctk_Arguments.h>
 #include <cctk_Parameters.h>
 #include <loop_device.hxx>
+#include <type_traits>
 
 #include "aster_utils.hxx"
+#include "rad_eos_utils.hxx"
 #include "setup_eos.hxx"
 
 namespace AsterX {
@@ -12,12 +14,20 @@ using namespace Loop;
 using namespace EOSX;
 using namespace std;
 
-enum class eos_3param { IdealGas, Hybrid, Tabulated };
+enum class eos_3param { IdealGas, RadIdealGas, Hybrid, Tabulated };
 
 template <typename EOSIDType, typename EOSType>
 void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
   DECLARE_CCTK_ARGUMENTSX_AsterX_CheckPrims;
   DECLARE_CCTK_PARAMETERS;
+
+  const GF3D2<const CCTK_REAL> optd = [&]() {
+    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+      return leakage_optd_gf(cctkGH);
+    } else {
+      return GF3D2<const CCTK_REAL>{rho};
+    }
+  }();
 
   // Loop over the entire grid (0 to n-1 cells in each direction)
   grid.loop_all_device<1, 1, 1>(
@@ -35,8 +45,78 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
         CCTK_REAL pressL = press(p.I);
         CCTK_REAL YeL = Ye(p.I);
         CCTK_REAL tempL = temperature(p.I);
+        CCTK_REAL optd_local = CCTK_REAL(0.0);
+        if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+          optd_local = optd(p.I);
+        }
+        const auto press_from_rho_temp =
+            [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
+                const CCTK_REAL ye_) ARITH_INLINE {
+              if constexpr (std::is_same_v<EOSType,
+                                            EOSX::eos_3p_rad_idealgas>) {
+                return eos_3p->press_from_rho_temp_ye_tau(rho_, temp_, ye_,
+                                                          optd_local);
+              } else {
+                return eos_3p->press_from_rho_temp_ye(rho_, temp_, ye_);
+              }
+            };
+        const auto eps_from_rho_temp =
+            [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
+                const CCTK_REAL ye_) ARITH_INLINE {
+              if constexpr (std::is_same_v<EOSType,
+                                            EOSX::eos_3p_rad_idealgas>) {
+                return eos_3p->eps_from_rho_temp_ye_tau(rho_, temp_, ye_,
+                                                        optd_local);
+              } else {
+                return eos_3p->eps_from_rho_temp_ye(rho_, temp_, ye_);
+              }
+            };
+        const auto eps_from_rho_press =
+            [&](const CCTK_REAL rho_, const CCTK_REAL press_,
+                const CCTK_REAL ye_) ARITH_INLINE {
+              if constexpr (std::is_same_v<EOSType,
+                                            EOSX::eos_3p_rad_idealgas>) {
+                return eos_3p->eps_from_rho_press_ye_tau(rho_, press_, ye_,
+                                                         optd_local);
+              } else {
+                return eos_3p->eps_from_rho_press_ye(rho_, press_, ye_);
+              }
+            };
+        const auto temp_from_rho_eps =
+            [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
+                const CCTK_REAL ye_) ARITH_INLINE {
+              if constexpr (std::is_same_v<EOSType,
+                                            EOSX::eos_3p_rad_idealgas>) {
+                return eos_3p->temp_from_rho_eps_ye_tau(rho_, eps_, ye_,
+                                                        optd_local);
+              } else {
+                return eos_3p->temp_from_rho_eps_ye(rho_, eps_, ye_);
+              }
+            };
+        const auto press_from_rho_eps =
+            [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
+                const CCTK_REAL ye_) ARITH_INLINE {
+              if constexpr (std::is_same_v<EOSType,
+                                            EOSX::eos_3p_rad_idealgas>) {
+                return eos_3p->press_from_rho_eps_ye_tau(rho_, eps_, ye_,
+                                                         optd_local);
+              } else {
+                return eos_3p->press_from_rho_eps_ye(rho_, eps_, ye_);
+              }
+            };
+        const auto entropy_from_rho_eps =
+            [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
+                const CCTK_REAL ye_) ARITH_INLINE {
+              if constexpr (std::is_same_v<EOSType,
+                                            EOSX::eos_3p_rad_idealgas>) {
+                return eos_3p->kappa_from_rho_eps_ye_tau(rho_, eps_, ye_,
+                                                         optd_local);
+              } else {
+                return eos_3p->kappa_from_rho_eps_ye(rho_, eps_, ye_);
+              }
+            };
         // Consistent entropy
-        CCTK_REAL entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+        CCTK_REAL entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
 
         // Setting up atmosphere
         CCTK_REAL rho_atm = 0.0;   // dummy initialization
@@ -62,12 +142,11 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
                 (radial_distance > r_atmo)
                     ? (p_atmo * pow(r_atmo / radial_distance, n_press_atmo))
                     : p_atmo;
-            press_atm = std::max(eos_3p->press_from_rho_temp_ye(
-                                     rho_atm, eos_3p->rgtemp.min, Ye_atmo),
-                                 press_atm);
-            eps_atm =
-                eos_3p->eps_from_rho_press_ye(rho_atm, press_atm, Ye_atmo);
-            temp_atm = eos_3p->temp_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
+            press_atm = std::max(
+                press_from_rho_temp(rho_atm, eos_3p->rgtemp.min, Ye_atmo),
+                press_atm);
+            eps_atm = eps_from_rho_press(rho_atm, press_atm, Ye_atmo);
+            temp_atm = temp_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
           } else {
             temp_atm =
                 (radial_distance > r_atmo)
@@ -75,9 +154,8 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
                     : t_atmo;
             temp_atm = std::max(eos_3p->rgtemp.min, temp_atm);
             // temp_atm = max(temp_atm, eos_3p->interptable->xmin<1>());
-            press_atm =
-                eos_3p->press_from_rho_temp_ye(rho_atm, temp_atm, Ye_atmo);
-            eps_atm = eos_3p->eps_from_rho_temp_ye(rho_atm, temp_atm, Ye_atmo);
+            press_atm = press_from_rho_temp(rho_atm, temp_atm, Ye_atmo);
+            eps_atm = eps_from_rho_temp(rho_atm, temp_atm, Ye_atmo);
             // eps_atm should be kept consistent with temp_atm, so we do not use
             // the setting below
             // eps_atm =
@@ -88,16 +166,16 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
         } else {
           const CCTK_REAL gm1 = eos_1p->gm1_from_rho(rho_atm);
           eps_atm = eos_1p->sed_from_gm1(gm1);
-          eps_atm = std::max(eos_3p->eps_from_rho_temp_ye(
-                                 rho_atm, eos_3p->rgtemp.min, Ye_atmo),
-                             eps_atm);
-          temp_atm = eos_3p->temp_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
+          eps_atm = std::max(
+              eps_from_rho_temp(rho_atm, eos_3p->rgtemp.min, Ye_atmo),
+              eps_atm);
+          temp_atm = temp_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
           // eps_atm should be kept consistent with temp_atm, so we do not use
           // the setting below
           // eps_atm =
           //    std::min(std::max(eos_3p->rgeps.min, eps_atm),
           //    eos_3p->rgeps.max);
-          press_atm = eos_3p->press_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
+          press_atm = press_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
         }
 
         const CCTK_REAL rho_atmo_cut = rho_atm * (1 + atmo_tol);
@@ -148,13 +226,13 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
           rhoL = rhomax;
 
           if (use_temperature) {
-            epsL = eos_3p->eps_from_rho_temp_ye(rhoL, tempL, YeL);
-            pressL = eos_3p->press_from_rho_temp_ye(rhoL, tempL, YeL);
+            epsL = eps_from_rho_temp(rhoL, tempL, YeL);
+            pressL = press_from_rho_temp(rhoL, tempL, YeL);
           } else {
-            epsL = eos_3p->eps_from_rho_press_ye(rhoL, pressL, YeL);
-            tempL = eos_3p->temp_from_rho_eps_ye(rhoL, epsL, YeL);
+            epsL = eps_from_rho_press(rhoL, pressL, YeL);
+            tempL = temp_from_rho_eps(rhoL, epsL, YeL);
           }
-          entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+          entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
         }
 
         if (rhoL < rho_atmo_cut) {
@@ -163,13 +241,13 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
           rhoL = rho_atm;
 
           if (use_temperature) {
-            epsL = eos_3p->eps_from_rho_temp_ye(rhoL, tempL, YeL);
-            pressL = eos_3p->press_from_rho_temp_ye(rhoL, tempL, YeL);
+            epsL = eps_from_rho_temp(rhoL, tempL, YeL);
+            pressL = press_from_rho_temp(rhoL, tempL, YeL);
           } else {
-            epsL = eos_3p->eps_from_rho_press_ye(rhoL, pressL, YeL);
-            tempL = eos_3p->temp_from_rho_eps_ye(rhoL, epsL, YeL);
+            epsL = eps_from_rho_press(rhoL, pressL, YeL);
+            tempL = temp_from_rho_eps(rhoL, epsL, YeL);
           }
-          entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+          entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
         }
 
         // ----------
@@ -181,15 +259,15 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
           // check the validity of the computed temperature
           if (tempL > tempmax) {
             tempL = tempmax;
-            epsL = eos_3p->eps_from_rho_temp_ye(rhoL, tempL, YeL);
-            pressL = eos_3p->press_from_rho_temp_ye(rhoL, tempL, YeL);
-            entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+            epsL = eps_from_rho_temp(rhoL, tempL, YeL);
+            pressL = press_from_rho_temp(rhoL, tempL, YeL);
+            entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
           }
           if (tempL < temp_atm) {
             tempL = temp_atm;
-            epsL = eos_3p->eps_from_rho_temp_ye(rhoL, tempL, YeL);
-            pressL = eos_3p->press_from_rho_temp_ye(rhoL, tempL, YeL);
-            entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+            epsL = eps_from_rho_temp(rhoL, tempL, YeL);
+            pressL = press_from_rho_temp(rhoL, tempL, YeL);
+            entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
           }
         }
 
@@ -205,9 +283,9 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
         if (epsL > epsmax) {
 
           epsL = epsmax;
-          tempL = eos_3p->temp_from_rho_eps_ye(rhoL, epsL, YeL);
-          pressL = eos_3p->press_from_rho_eps_ye(rhoL, epsL, YeL);
-          entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+          tempL = temp_from_rho_eps(rhoL, epsL, YeL);
+          pressL = press_from_rho_eps(rhoL, epsL, YeL);
+          entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
         }
 
         if (use_press_atmo) {
@@ -215,9 +293,9 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
           if (pressL < press_atm) {
 
             pressL = press_atm;
-            epsL = eos_3p->eps_from_rho_press_ye(rhoL, pressL, YeL);
-            tempL = eos_3p->temp_from_rho_eps_ye(rhoL, epsL, YeL);
-            entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+            epsL = eps_from_rho_press(rhoL, pressL, YeL);
+            tempL = temp_from_rho_eps(rhoL, epsL, YeL);
+            entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
           }
 
         } else {
@@ -225,9 +303,9 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
           if (epsL < epsmin) {
 
             epsL = epsmin;
-            tempL = eos_3p->temp_from_rho_eps_ye(rhoL, epsL, YeL);
-            pressL = eos_3p->press_from_rho_eps_ye(rhoL, epsL, YeL);
-            entropyL = eos_3p->kappa_from_rho_eps_ye(rhoL, epsL, YeL);
+            tempL = temp_from_rho_eps(rhoL, epsL, YeL);
+            pressL = press_from_rho_eps(rhoL, epsL, YeL);
+            entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
           }
         }
 
@@ -270,6 +348,8 @@ extern "C" void AsterX_CheckPrims(CCTK_ARGUMENTS) {
 
   if (CCTK_EQUALS(evolution_eos, "IdealGas")) {
     eos_3p_type = eos_3param::IdealGas;
+  } else if (CCTK_EQUALS(evolution_eos, "Rad_idealgas")) {
+    eos_3p_type = eos_3param::RadIdealGas;
   } else if (CCTK_EQUALS(evolution_eos, "Hybrid")) {
     eos_3p_type = eos_3param::Hybrid;
   } else if (CCTK_EQUALS(evolution_eos, "Tabulated3d")) {
@@ -285,6 +365,13 @@ extern "C" void AsterX_CheckPrims(CCTK_ARGUMENTS) {
     auto eos_3p_ig = global_eos_3p_ig;
 
     CheckPrims(cctkGH, eos_1p_poly, eos_3p_ig);
+    break;
+  }
+  case eos_3param::RadIdealGas: {
+    auto eos_1p_poly = global_eos_1p_poly;
+    auto eos_3p_rad_ig = global_eos_3p_rad_ig;
+
+    CheckPrims(cctkGH, eos_1p_poly, eos_3p_rad_ig);
     break;
   }
   case eos_3param::Hybrid: {

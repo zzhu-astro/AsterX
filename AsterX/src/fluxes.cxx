@@ -13,10 +13,12 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <type_traits>
 
 #include "aster_utils.hxx"
 #include "eigenvalues.hxx"
 #include "fluxes.hxx"
+#include "rad_eos_utils.hxx"
 #include "reconstruct.hxx"
 #include "setup_eos.hxx"
 
@@ -29,7 +31,7 @@ using namespace ReconX;
 using namespace AsterUtils;
 
 enum class flux_t { LxF, HLLE };
-enum class eos_3param { IdealGas, Hybrid, Tabulated };
+enum class eos_3param { IdealGas, RadIdealGas, Hybrid, Tabulated };
 enum class rec_var_t { v_vec, z_vec, s_vec };
 
 // Calculate the fluxes in direction `dir`. This function is more
@@ -100,6 +102,13 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
                                           vbar_y_zface};
   const vec<GF3D2<CCTK_REAL>, dim> ap_face{amax_xface, amax_yface, amax_zface};
   const vec<GF3D2<CCTK_REAL>, dim> am_face{amin_xface, amin_yface, amin_zface};
+  const GF3D2<const CCTK_REAL> optd = [&]() {
+    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+      return leakage_optd_gf(cctkGH);
+    } else {
+      return GF3D2<const CCTK_REAL>{rho};
+    }
+  }();
 
   /* grid functions for PP flux limiter */
   const vec<GF3D2<CCTK_REAL>, dim> gf_theta{theta_x, theta_y, theta_z};
@@ -220,6 +229,67 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
     vec<CCTK_REAL, 2> eps_rc;
     vec<CCTK_REAL, 2> press_rc;
     vec<CCTK_REAL, 2> temp_rc;
+    vec<CCTK_REAL, 2> optd_rc{CCTK_REAL(0.0), CCTK_REAL(0.0)};
+    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+      optd_rc = {optd(p.I - p.DI[dir_i]), optd(p.I)};
+    }
+
+    const auto press_from_rho_temp =
+        [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
+            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->press_from_rho_temp_ye_tau(rho_, temp_, ye_,
+                                                      optd_);
+          } else {
+            return eos_3p->press_from_rho_temp_ye(rho_, temp_, ye_);
+          }
+        };
+    const auto eps_from_rho_temp =
+        [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
+            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->eps_from_rho_temp_ye_tau(rho_, temp_, ye_, optd_);
+          } else {
+            return eos_3p->eps_from_rho_temp_ye(rho_, temp_, ye_);
+          }
+        };
+    const auto eps_from_rho_press =
+        [&](const CCTK_REAL rho_, const CCTK_REAL press_,
+            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->eps_from_rho_press_ye_tau(rho_, press_, ye_,
+                                                     optd_);
+          } else {
+            return eos_3p->eps_from_rho_press_ye(rho_, press_, ye_);
+          }
+        };
+    const auto temp_from_rho_eps =
+        [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
+            const CCTK_REAL optd_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->temp_from_rho_eps_ye_tau(rho_, eps_, ye_, optd_);
+          } else {
+            return eos_3p->temp_from_rho_eps_ye(rho_, eps_, ye_);
+          }
+        };
+    const auto entropy_from_rho_eps =
+        [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
+            const CCTK_REAL optd_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->kappa_from_rho_eps_ye_tau(rho_, eps_, ye_, optd_);
+          } else {
+            return eos_3p->kappa_from_rho_eps_ye(rho_, eps_, ye_);
+          }
+        };
+    const auto csnd_from_rho_temp =
+        [&](const CCTK_REAL rho_, const CCTK_REAL temp_, const CCTK_REAL ye_,
+            const CCTK_REAL optd_) ARITH_INLINE {
+          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+            return eos_3p->csnd_from_rho_temp_ye_tau(rho_, temp_, ye_, optd_);
+          } else {
+            return eos_3p->csnd_from_rho_temp_ye(rho_, temp_, ye_);
+          }
+        };
 
     // Setting up atmosphere for two neighboring cell centers
     vec<CCTK_REAL, 2> r_atm;
@@ -258,23 +328,25 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
       press_atm(0) = (r_atm(0) > r_atmo)
                          ? (p_atmo * pow(r_atmo / r_atm(0), n_press_atmo))
                          : p_atmo;
-      press_atm(0) = std::max(eos_3p->press_from_rho_temp_ye(
-                                  rho_atm(0), eos_3p->rgtemp.min, Ye_atmo),
-                              press_atm(0));
+      press_atm(0) = std::max(
+          press_from_rho_temp(rho_atm(0), eos_3p->rgtemp.min, Ye_atmo,
+                              optd_rc(0)),
+          press_atm(0));
       press_atm(1) = (r_atm(1) > r_atmo)
                          ? (p_atmo * pow(r_atmo / r_atm(1), n_press_atmo))
                          : p_atmo;
-      press_atm(1) = std::max(eos_3p->press_from_rho_temp_ye(
-                                  rho_atm(1), eos_3p->rgtemp.min, Ye_atmo),
-                              press_atm(1));
-      eps_atm(0) =
-          eos_3p->eps_from_rho_press_ye(rho_atm(0), press_atm(0), Ye_atmo);
-      eps_atm(1) =
-          eos_3p->eps_from_rho_press_ye(rho_atm(1), press_atm(1), Ye_atmo);
-      temp_atm(0) =
-          eos_3p->temp_from_rho_eps_ye(rho_atm(0), eps_atm(0), Ye_atmo);
-      temp_atm(1) =
-          eos_3p->temp_from_rho_eps_ye(rho_atm(1), eps_atm(1), Ye_atmo);
+      press_atm(1) = std::max(
+          press_from_rho_temp(rho_atm(1), eos_3p->rgtemp.min, Ye_atmo,
+                              optd_rc(1)),
+          press_atm(1));
+      eps_atm(0) = eps_from_rho_press(rho_atm(0), press_atm(0), Ye_atmo,
+                                      optd_rc(0));
+      eps_atm(1) = eps_from_rho_press(rho_atm(1), press_atm(1), Ye_atmo,
+                                      optd_rc(1));
+      temp_atm(0) = temp_from_rho_eps(rho_atm(0), eps_atm(0), Ye_atmo,
+                                      optd_rc(0));
+      temp_atm(1) = temp_from_rho_eps(rho_atm(1), eps_atm(1), Ye_atmo,
+                                      optd_rc(1));
     } else {
       temp_atm(0) = (r_atm(0) > r_atmo)
                         ? (t_atmo * pow(r_atmo / r_atm(0), n_temp_atmo))
@@ -285,14 +357,14 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
                         ? (t_atmo * pow(r_atmo / r_atm(1), n_temp_atmo))
                         : t_atmo;
       temp_atm(1) = std::max(eos_3p->rgtemp.min, temp_atm(1));
-      press_atm(0) =
-          eos_3p->press_from_rho_temp_ye(rho_atm(0), temp_atm(0), Ye_atmo);
-      press_atm(1) =
-          eos_3p->press_from_rho_temp_ye(rho_atm(1), temp_atm(1), Ye_atmo);
-      eps_atm(0) =
-          eos_3p->eps_from_rho_temp_ye(rho_atm(0), temp_atm(0), Ye_atmo);
-      eps_atm(1) =
-          eos_3p->eps_from_rho_temp_ye(rho_atm(1), temp_atm(1), Ye_atmo);
+      press_atm(0) = press_from_rho_temp(rho_atm(0), temp_atm(0), Ye_atmo,
+                                         optd_rc(0));
+      press_atm(1) = press_from_rho_temp(rho_atm(1), temp_atm(1), Ye_atmo,
+                                         optd_rc(1));
+      eps_atm(0) = eps_from_rho_temp(rho_atm(0), temp_atm(0), Ye_atmo,
+                                     optd_rc(0));
+      eps_atm(1) = eps_from_rho_temp(rho_atm(1), temp_atm(1), Ye_atmo,
+                                     optd_rc(1));
     }
     // End atmosphere
 
@@ -323,16 +395,16 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
       if (rho_rc(0) <= rho_cut(0)) {
         resetL = true;
         rho_rc(0) = rho_atm(0);
-        entropy_rc(0) =
-            eos_3p->kappa_from_rho_eps_ye(rho_atm(0), eps_atm(0), Ye_atmo);
+        entropy_rc(0) = entropy_from_rho_eps(rho_atm(0), eps_atm(0), Ye_atmo,
+                                             optd_rc(0));
         temp_rc(0) = temp_atm(0);
         Ye_rc(0) = Ye_atmo;
       }
       if (rho_rc(1) <= rho_cut(1)) {
         resetR = true;
         rho_rc(1) = rho_atm(1);
-        entropy_rc(1) =
-            eos_3p->kappa_from_rho_eps_ye(rho_atm(1), eps_atm(1), Ye_atmo);
+        entropy_rc(1) = entropy_from_rho_eps(rho_atm(1), eps_atm(1), Ye_atmo,
+                                             optd_rc(1));
         temp_rc(1) = temp_atm(1);
         Ye_rc(1) = Ye_atmo;
       }
@@ -341,9 +413,9 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
       // Compute eps_rc and press_rc using lambdas
       for (int f = 0; f < 2; ++f) {
         eps_rc(f) =
-            eos_3p->eps_from_rho_temp_ye(rho_rc(f), temp_rc(f), Ye_rc(f));
+            eps_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), optd_rc(f));
         press_rc(f) =
-            eos_3p->press_from_rho_temp_ye(rho_rc(f), temp_rc(f), Ye_rc(f));
+            press_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), optd_rc(f));
       }
 
     } else {
@@ -369,16 +441,16 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
       if (rho_rc(0) <= rho_cut(0)) {
         resetL = true;
         rho_rc(0) = rho_atm(0);
-        entropy_rc(0) =
-            eos_3p->kappa_from_rho_eps_ye(rho_atm(0), eps_atm(0), Ye_atmo);
+        entropy_rc(0) = entropy_from_rho_eps(rho_atm(0), eps_atm(0), Ye_atmo,
+                                             optd_rc(0));
         press_rc(0) = press_atm(0);
         Ye_rc(0) = Ye_atmo;
       }
       if (rho_rc(1) <= rho_cut(1)) {
         resetR = true;
         rho_rc(1) = rho_atm(1);
-        entropy_rc(1) =
-            eos_3p->kappa_from_rho_eps_ye(rho_atm(1), eps_atm(1), Ye_atmo);
+        entropy_rc(1) = entropy_from_rho_eps(rho_atm(1), eps_atm(1), Ye_atmo,
+                                             optd_rc(1));
         press_rc(1) = press_atm(1);
         Ye_rc(1) = Ye_atmo;
       }
@@ -387,9 +459,9 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
       // Compute eps_rc and temp_rc using lambdas
       for (int f = 0; f < 2; ++f) {
         eps_rc(f) =
-            eos_3p->eps_from_rho_press_ye(rho_rc(f), press_rc(f), Ye_rc(f));
+            eps_from_rho_press(rho_rc(f), press_rc(f), Ye_rc(f), optd_rc(f));
         temp_rc(f) =
-            eos_3p->temp_from_rho_eps_ye(rho_rc(f), eps_rc(f), Ye_rc(f));
+            temp_from_rho_eps(rho_rc(f), eps_rc(f), Ye_rc(f), optd_rc(f));
       }
     }
 
@@ -599,8 +671,9 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
     // vars
 
     const vec<CCTK_REAL, 2> cs2_rc([&](int f) ARITH_INLINE {
-      return eos_3p->csnd_from_rho_temp_ye(rho_rc(f), temp_rc(f), Ye_rc(f)) *
-             eos_3p->csnd_from_rho_temp_ye(rho_rc(f), temp_rc(f), Ye_rc(f));
+      const CCTK_REAL cs =
+          csnd_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), optd_rc(f));
+      return cs * cs;
     });
 
     const vec<CCTK_REAL, 2> h_rc([&](int f) ARITH_INLINE {
@@ -1158,6 +1231,8 @@ extern "C" void AsterX_Fluxes(CCTK_ARGUMENTS) {
 
   if (CCTK_EQUALS(evolution_eos, "IdealGas")) {
     eos_3p_type = eos_3param::IdealGas;
+  } else if (CCTK_EQUALS(evolution_eos, "Rad_idealgas")) {
+    eos_3p_type = eos_3param::RadIdealGas;
   } else if (CCTK_EQUALS(evolution_eos, "Hybrid")) {
     eos_3p_type = eos_3param::Hybrid;
   } else if (CCTK_EQUALS(evolution_eos, "Tabulated3d")) {
@@ -1253,6 +1328,17 @@ extern "C" void AsterX_Fluxes(CCTK_ARGUMENTS) {
                 reconstruct_params, fluxtype);
     CalcFlux<2>(cctkGH, eos_3p_ig, rec_var, reconstruction, reconstruction_LO,
                 reconstruct_params, fluxtype);
+    break;
+  }
+  case eos_3param::RadIdealGas: {
+    auto eos_3p_rad_ig = global_eos_3p_rad_ig;
+
+    CalcFlux<0>(cctkGH, eos_3p_rad_ig, rec_var, reconstruction,
+                reconstruction_LO, reconstruct_params, fluxtype);
+    CalcFlux<1>(cctkGH, eos_3p_rad_ig, rec_var, reconstruction,
+                reconstruction_LO, reconstruct_params, fluxtype);
+    CalcFlux<2>(cctkGH, eos_3p_rad_ig, rec_var, reconstruction,
+                reconstruction_LO, reconstruct_params, fluxtype);
     break;
   }
   case eos_3param::Hybrid: {

@@ -3,9 +3,11 @@
 #include <cctk.h>
 #include <cctk_Arguments.h>
 #include <cctk_Parameters.h>
+#include <type_traits>
 
 #include "setup_eos.hxx"
 #include "aster_utils.hxx"
+#include "rad_eos_utils.hxx"
 
 namespace AsterX {
 using namespace std;
@@ -14,7 +16,7 @@ using namespace Arith;
 using namespace AsterUtils;
 using namespace EOSX;
 
-enum class eos_3param { IdealGas, Hybrid, Tabulated };
+enum class eos_3param { IdealGas, RadIdealGas, Hybrid, Tabulated };
 
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 LOFlagVar(const GF3D2<const CCTK_REAL> &gf, const CCTK_REAL ref,
@@ -47,13 +49,21 @@ LOFlagVar(const GF3D2<const CCTK_REAL> &gf, const CCTK_REAL ref,
 }
 
 // Calculate low-order flag for a particular gridfunction
-template <typename EOSType> void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
+template <typename EOSType>
+void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
   DECLARE_CCTK_ARGUMENTSX_AsterX_SetLOFlag;
   DECLARE_CCTK_PARAMETERS;
 
   const smat<GF3D2<const CCTK_REAL>, dim> gf_g{gxx, gxy, gxz, gyy, gyz, gzz};
   const vec<GF3D2<const CCTK_REAL>, dim> gf_vels{velx, vely, velz};
   const vec<GF3D2<const CCTK_REAL>, dim> gf_Bvecs{Bvecx, Bvecy, Bvecz};
+  const GF3D2<const CCTK_REAL> optd = [&]() {
+    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+      return leakage_optd_gf(cctkGH);
+    } else {
+      return GF3D2<const CCTK_REAL>{rho};
+    }
+  }();
 
   // Loop over the grid
   grid.loop_int_device<1, 1, 1>(
@@ -89,8 +99,14 @@ template <typename EOSType> void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
         }
 
         // Calculate c_sound
-        const CCTK_REAL cs =
-            eos_3p->csnd_from_rho_temp_ye(rho(p.I), temperature(p.I), Ye(p.I));
+        CCTK_REAL cs;
+        if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+          cs = eos_3p->csnd_from_rho_temp_ye_tau(
+              rho(p.I), temperature(p.I), Ye(p.I), optd(p.I));
+        } else {
+          cs = eos_3p->csnd_from_rho_temp_ye(rho(p.I), temperature(p.I),
+                                             Ye(p.I));
+        }
 
         // Check velocity
         for (int dir = 0; dir < 3; dir++) {
@@ -139,6 +155,8 @@ extern "C" void AsterX_SetLOFlag(CCTK_ARGUMENTS) {
 
   if (CCTK_EQUALS(evolution_eos, "IdealGas")) {
     eos_3p_type = eos_3param::IdealGas;
+  } else if (CCTK_EQUALS(evolution_eos, "Rad_idealgas")) {
+    eos_3p_type = eos_3param::RadIdealGas;
   } else if (CCTK_EQUALS(evolution_eos, "Hybrid")) {
     eos_3p_type = eos_3param::Hybrid;
   } else if (CCTK_EQUALS(evolution_eos, "Tabulated3d")) {
@@ -152,6 +170,11 @@ extern "C" void AsterX_SetLOFlag(CCTK_ARGUMENTS) {
     // Get local eos object
     auto eos_3p_ig = global_eos_3p_ig;
     CalcLOFlag(cctkGH, eos_3p_ig);
+    break;
+  }
+  case eos_3param::RadIdealGas: {
+    auto eos_3p_rad_ig = global_eos_3p_rad_ig;
+    CalcLOFlag(cctkGH, eos_3p_rad_ig);
     break;
   }
   case eos_3param::Hybrid: {

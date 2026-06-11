@@ -105,6 +105,7 @@ SCHEDULE AsterX_CheckPrims IN AsterX_InitialGroup AFTER AsterX_ComputeBFromdB
   READS: ADMBaseX::metric(everywhere)
   READS: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::eps(everywhere) HydroBaseX::press(everywhere) HydroBaseX::temperature(everywhere) HydroBaseX::Bvec(everywhere)
   READS: HydroBaseX::entropy(everywhere) HydroBaseX::Ye(everywhere)
+  READS: LeakageBaseX::optical_depth(everywhere)
   WRITES: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::eps(everywhere) HydroBaseX::press(everywhere)
   WRITES: HydroBaseX::temperature(everywhere) HydroBaseX::entropy(everywhere) HydroBaseX::Ye(everywhere)
   WRITES: saved_prims(everywhere)
@@ -244,6 +245,7 @@ SCHEDULE AsterX_Con2Prim IN AsterX_Con2PrimGroup AFTER AsterX_ComputedBFromdBsta
   READS: ADMBaseX::shift(everywhere)
   READS: saved_prims(everywhere)
   READS: Avec_x(everywhere) Avec_y(everywhere) Avec_z(everywhere)
+  READS: LeakageBaseX::optical_depth(everywhere)
   WRITES: con2prim_flag(everywhere)
   WRITES: diagnostics(everywhere)
   WRITES: AsterMasks::aster_mask_cc(everywhere)
@@ -274,6 +276,7 @@ if (use_deriv_shock_detector)
     LANG: C
     READS: ADMBaseX::metric(interior)
     READS: HydroBaseX::rho(interior) HydroBaseX::vel(interior) HydroBaseX::eps(interior) HydroBaseX::press(interior) HydroBaseX::temperature(interior) HydroBaseX::Ye(interior) HydroBaseX::Bvec(interior)
+    READS: LeakageBaseX::optical_depth(interior)
     WRITES: etac(interior) LOflag(interior)
     SYNC: LOflag
   } "Detect shocks, flag for low-order recon fallback"
@@ -293,6 +296,7 @@ SCHEDULE AsterX_Fluxes IN AsterX_RHSGroup
   READS: HydroBaseX::temperature(everywhere) HydroBaseX::Ye(everywhere)
   READS: HydroBaseX::Bvec(everywhere)
   READS: HydroBaseX::entropy(everywhere)
+  READS: LeakageBaseX::optical_depth(everywhere)
   READS: dBx_stag(everywhere) dBy_stag(everywhere) dBz_stag(everywhere)
   READS: zvec_x(everywhere) zvec_y(everywhere) zvec_z(everywhere)
   READS: svec_x(everywhere) svec_y(everywhere) svec_z(everywhere)
