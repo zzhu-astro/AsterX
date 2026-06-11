@@ -99,19 +99,34 @@ SCHEDULE AsterX_ComputeBFromdB IN AsterX_InitialGroup AFTER AsterX_ComputedBFrom
   WRITES: HydroBaseX::Bvec(everywhere)
 } "Calculate centered B from densitized B"
 
+if (CCTK_IsThornActive("LeakageBaseX")) {
 SCHEDULE AsterX_CheckPrims IN AsterX_InitialGroup AFTER AsterX_ComputeBFromdB
 {
   LANG: C
   READS: ADMBaseX::metric(everywhere)
   READS: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::eps(everywhere) HydroBaseX::press(everywhere) HydroBaseX::temperature(everywhere) HydroBaseX::Bvec(everywhere)
   READS: HydroBaseX::entropy(everywhere) HydroBaseX::Ye(everywhere)
-  READS: LeakageBaseX::optical_depth(everywhere)
+  READS: LeakageBaseX::optd(everywhere)
   WRITES: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::eps(everywhere) HydroBaseX::press(everywhere)
   WRITES: HydroBaseX::temperature(everywhere) HydroBaseX::entropy(everywhere) HydroBaseX::Ye(everywhere)
   WRITES: saved_prims(everywhere)
   WRITES: zvec(everywhere)
   WRITES: svec(everywhere)
 } "Enforce limits on primitive variables"
+} else {
+SCHEDULE AsterX_CheckPrims IN AsterX_InitialGroup AFTER AsterX_ComputeBFromdB
+{
+  LANG: C
+  READS: ADMBaseX::metric(everywhere)
+  READS: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::eps(everywhere) HydroBaseX::press(everywhere) HydroBaseX::temperature(everywhere) HydroBaseX::Bvec(everywhere)
+  READS: HydroBaseX::entropy(everywhere) HydroBaseX::Ye(everywhere)
+  WRITES: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::eps(everywhere) HydroBaseX::press(everywhere)
+  WRITES: HydroBaseX::temperature(everywhere) HydroBaseX::entropy(everywhere) HydroBaseX::Ye(everywhere)
+  WRITES: saved_prims(everywhere)
+  WRITES: zvec(everywhere)
+  WRITES: svec(everywhere)
+} "Enforce limits on primitive variables"
+}
 
 SCHEDULE AsterX_Prim2Con_Initial IN AsterX_InitialGroup AFTER AsterX_CheckPrims
 {
@@ -235,6 +250,7 @@ if (mag_correction_order > 2) {
   } "Communicate cell centered dB between processes"
 }
 
+if (CCTK_IsThornActive("LeakageBaseX")) {
 SCHEDULE AsterX_Con2Prim IN AsterX_Con2PrimGroup AFTER AsterX_ComputedBFromdBstag
 {
   LANG: C
@@ -245,7 +261,7 @@ SCHEDULE AsterX_Con2Prim IN AsterX_Con2PrimGroup AFTER AsterX_ComputedBFromdBsta
   READS: ADMBaseX::shift(everywhere)
   READS: saved_prims(everywhere)
   READS: Avec_x(everywhere) Avec_y(everywhere) Avec_z(everywhere)
-  READS: LeakageBaseX::optical_depth(everywhere)
+  READS: LeakageBaseX::optd(everywhere)
   WRITES: con2prim_flag(everywhere)
   WRITES: diagnostics(everywhere)
   WRITES: AsterMasks::aster_mask_cc(everywhere)
@@ -256,6 +272,28 @@ SCHEDULE AsterX_Con2Prim IN AsterX_Con2PrimGroup AFTER AsterX_ComputedBFromdBsta
   WRITES: svec(everywhere)
   WRITES: cons_vector(everywhere) dB(everywhere)
 } "Calculate primitive variables from conservative variables"
+} else {
+SCHEDULE AsterX_Con2Prim IN AsterX_Con2PrimGroup AFTER AsterX_ComputedBFromdBstag
+{
+  LANG: C
+  READS: AsterMasks::aster_mask_vc(everywhere)
+  READS: ADMBaseX::metric(everywhere)
+  READS: ADMBaseX::lapse(everywhere)
+  READS: cons_vector(everywhere) dB(everywhere)
+  READS: ADMBaseX::shift(everywhere)
+  READS: saved_prims(everywhere)
+  READS: Avec_x(everywhere) Avec_y(everywhere) Avec_z(everywhere)
+  WRITES: con2prim_flag(everywhere)
+  WRITES: diagnostics(everywhere)
+  WRITES: AsterMasks::aster_mask_cc(everywhere)
+  WRITES: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::eps(everywhere) HydroBaseX::press(everywhere) HydroBaseX::Bvec(everywhere)
+  WRITES: HydroBaseX::temperature(everywhere) HydroBaseX::entropy(everywhere) HydroBaseX::Ye(everywhere)
+  WRITES: saved_prims(everywhere)
+  WRITES: zvec(everywhere)
+  WRITES: svec(everywhere)
+  WRITES: cons_vector(everywhere) dB(everywhere)
+} "Calculate primitive variables from conservative variables"
+}
 
 SCHEDULE AsterX_ApplyOuterBCOnPrim IN AsterX_Con2PrimGroup AFTER AsterX_Con2Prim
 {
@@ -271,21 +309,33 @@ SCHEDULE AsterX_InitLOFlag IN CCTK_PRESTEP
 
 if (use_deriv_shock_detector)
 {
-  SCHEDULE AsterX_SetLOFlag IN CCTK_PRESTEP AFTER AsterX_InitLOFlag 
+if (CCTK_IsThornActive("LeakageBaseX")) {
+  SCHEDULE AsterX_SetLOFlag IN CCTK_PRESTEP AFTER AsterX_InitLOFlag
   {
     LANG: C
     READS: ADMBaseX::metric(interior)
     READS: HydroBaseX::rho(interior) HydroBaseX::vel(interior) HydroBaseX::eps(interior) HydroBaseX::press(interior) HydroBaseX::temperature(interior) HydroBaseX::Ye(interior) HydroBaseX::Bvec(interior)
-    READS: LeakageBaseX::optical_depth(interior)
+    READS: LeakageBaseX::optd(interior)
     WRITES: etac(interior) LOflag(interior)
     SYNC: LOflag
   } "Detect shocks, flag for low-order recon fallback"
+} else {
+  SCHEDULE AsterX_SetLOFlag IN CCTK_PRESTEP AFTER AsterX_InitLOFlag
+  {
+    LANG: C
+    READS: ADMBaseX::metric(interior)
+    READS: HydroBaseX::rho(interior) HydroBaseX::vel(interior) HydroBaseX::eps(interior) HydroBaseX::press(interior) HydroBaseX::temperature(interior) HydroBaseX::Ye(interior) HydroBaseX::Bvec(interior)
+    WRITES: etac(interior) LOflag(interior)
+    SYNC: LOflag
+  } "Detect shocks, flag for low-order recon fallback"
+}
 }
 
 SCHEDULE GROUP AsterX_RHSGroup IN ODESolvers_RHS
 {
 } "Calculate AsterX RHS"
 
+if (CCTK_IsThornActive("LeakageBaseX")) {
 SCHEDULE AsterX_Fluxes IN AsterX_RHSGroup
 {
   LANG: C
@@ -296,7 +346,7 @@ SCHEDULE AsterX_Fluxes IN AsterX_RHSGroup
   READS: HydroBaseX::temperature(everywhere) HydroBaseX::Ye(everywhere)
   READS: HydroBaseX::Bvec(everywhere)
   READS: HydroBaseX::entropy(everywhere)
-  READS: LeakageBaseX::optical_depth(everywhere)
+  READS: LeakageBaseX::optd(everywhere)
   READS: dBx_stag(everywhere) dBy_stag(everywhere) dBz_stag(everywhere)
   READS: zvec_x(everywhere) zvec_y(everywhere) zvec_z(everywhere)
   READS: svec_x(everywhere) svec_y(everywhere) svec_z(everywhere)
@@ -308,6 +358,29 @@ SCHEDULE AsterX_Fluxes IN AsterX_RHSGroup
   WRITES: vbar_xface(everywhere) vbar_yface(everywhere) vbar_zface(everywhere)
   WRITES: a_xface(everywhere) a_yface(everywhere) a_zface(everywhere)
 } "Calculate the hydro fluxes"
+} else {
+SCHEDULE AsterX_Fluxes IN AsterX_RHSGroup
+{
+  LANG: C
+  READS: ADMBaseX::metric(everywhere)
+  READS: ADMBaseX::lapse(everywhere)
+  READS: ADMBaseX::shift(everywhere)
+  READS: HydroBaseX::rho(everywhere) HydroBaseX::vel(everywhere) HydroBaseX::press(everywhere) HydroBaseX::eps(everywhere)
+  READS: HydroBaseX::temperature(everywhere) HydroBaseX::Ye(everywhere)
+  READS: HydroBaseX::Bvec(everywhere)
+  READS: HydroBaseX::entropy(everywhere)
+  READS: dBx_stag(everywhere) dBy_stag(everywhere) dBz_stag(everywhere)
+  READS: zvec_x(everywhere) zvec_y(everywhere) zvec_z(everywhere)
+  READS: svec_x(everywhere) svec_y(everywhere) svec_z(everywhere)
+  READS: Avec_x(everywhere) Avec_y(everywhere) Avec_z(everywhere) Psi(everywhere)
+  READS: cons_vector(everywhere)
+  READS: LOflag(everywhere)
+  WRITES: flux_x(everywhere) flux_y(everywhere) flux_z(everywhere)
+  WRITES: theta_x(everywhere) theta_y(everywhere) theta_z(everywhere)
+  WRITES: vbar_xface(everywhere) vbar_yface(everywhere) vbar_zface(everywhere)
+  WRITES: a_xface(everywhere) a_yface(everywhere) a_zface(everywhere)
+} "Calculate the hydro fluxes"
+}
 
 if(!use_subcycling) {
 SCHEDULE AsterX_RestrictFluxes IN AsterX_RHSGroup AFTER AsterX_Fluxes BEFORE AsterX_RHS
