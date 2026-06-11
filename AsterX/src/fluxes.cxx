@@ -102,13 +102,8 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
                                           vbar_y_zface};
   const vec<GF3D2<CCTK_REAL>, dim> ap_face{amax_xface, amax_yface, amax_zface};
   const vec<GF3D2<CCTK_REAL>, dim> am_face{amin_xface, amin_yface, amin_zface};
-  const GF3D2<const CCTK_REAL> optd = [&]() {
-    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-      return leakage_optd_gf(cctkGH);
-    } else {
-      return GF3D2<const CCTK_REAL>{rho};
-    }
-  }();
+  const GF3D2<const CCTK_REAL> optd =
+      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
 
   /* grid functions for PP flux limiter */
   const vec<GF3D2<CCTK_REAL>, dim> gf_theta{theta_x, theta_y, theta_z};
@@ -229,66 +224,39 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
     vec<CCTK_REAL, 2> eps_rc;
     vec<CCTK_REAL, 2> press_rc;
     vec<CCTK_REAL, 2> temp_rc;
-    vec<CCTK_REAL, 2> optd_rc{CCTK_REAL(0.0), CCTK_REAL(0.0)};
-    if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-      optd_rc = {optd(p.I - p.DI[dir_i]), optd(p.I)};
-    }
+    const vec<CCTK_REAL, 2> optd_rc{
+        local_optd<EOSType>(optd, p.I - p.DI[dir_i]),
+        local_optd<EOSType>(optd, p.I)};
 
     const auto press_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
             const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-            return eos_3p->press_from_rho_temp_ye_tau(rho_, temp_, ye_,
-                                                      optd_);
-          } else {
-            return eos_3p->press_from_rho_temp_ye(rho_, temp_, ye_);
-          }
+          return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_);
         };
     const auto eps_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
             const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-            return eos_3p->eps_from_rho_temp_ye_tau(rho_, temp_, ye_, optd_);
-          } else {
-            return eos_3p->eps_from_rho_temp_ye(rho_, temp_, ye_);
-          }
+          return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_);
         };
     const auto eps_from_rho_press =
         [&](const CCTK_REAL rho_, const CCTK_REAL press_,
             const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-            return eos_3p->eps_from_rho_press_ye_tau(rho_, press_, ye_,
-                                                     optd_);
-          } else {
-            return eos_3p->eps_from_rho_press_ye(rho_, press_, ye_);
-          }
+          return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_, optd_);
         };
     const auto temp_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
             const CCTK_REAL optd_) ARITH_INLINE {
-          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-            return eos_3p->temp_from_rho_eps_ye_tau(rho_, eps_, ye_, optd_);
-          } else {
-            return eos_3p->temp_from_rho_eps_ye(rho_, eps_, ye_);
-          }
+          return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_);
         };
     const auto entropy_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
             const CCTK_REAL optd_) ARITH_INLINE {
-          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-            return eos_3p->kappa_from_rho_eps_ye_tau(rho_, eps_, ye_, optd_);
-          } else {
-            return eos_3p->kappa_from_rho_eps_ye(rho_, eps_, ye_);
-          }
+          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_);
         };
     const auto csnd_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_, const CCTK_REAL ye_,
             const CCTK_REAL optd_) ARITH_INLINE {
-          if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-            return eos_3p->csnd_from_rho_temp_ye_tau(rho_, temp_, ye_, optd_);
-          } else {
-            return eos_3p->csnd_from_rho_temp_ye(rho_, temp_, ye_);
-          }
+          return eos_csnd_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_);
         };
 
     // Setting up atmosphere for two neighboring cell centers

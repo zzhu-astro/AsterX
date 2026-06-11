@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cassert>
+#include <type_traits>
 
 #include <cctk.h>
 #include <util_Table.h>
@@ -49,6 +50,109 @@ inline Loop::GF3D2<const CCTK_REAL> leakage_optd_gf(const cGH *cctkGH) {
   const Loop::GF3D2layout layout(cctkGH, group_indextype(gi));
   return Loop::GF3D2<const CCTK_REAL>(
       layout, static_cast<const CCTK_REAL *>(CCTK_VarDataPtrI(cctkGH, 0, vi)));
+}
+
+template <typename EOSType>
+inline Loop::GF3D2<const CCTK_REAL>
+optional_leakage_optd_gf(const cGH *cctkGH,
+                         const Loop::GF3D2<CCTK_REAL> &reference) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return leakage_optd_gf(cctkGH);
+  } else {
+    return Loop::GF3D2<const CCTK_REAL>(reference.layout, nullptr);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+local_optd(const Loop::GF3D2<const CCTK_REAL> &optd,
+           const Loop::vect<int, Loop::dim> &I) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return optd(I);
+  } else {
+    return CCTK_REAL(0.0);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_press_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
+                        const CCTK_REAL temp, const CCTK_REAL ye,
+                        const CCTK_REAL optd) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->press_from_rho_temp_ye_tau(rho, temp, ye, optd);
+  } else {
+    return eos->press_from_rho_temp_ye(rho, temp, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_eps_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
+                      const CCTK_REAL temp, const CCTK_REAL ye,
+                      const CCTK_REAL optd) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->eps_from_rho_temp_ye_tau(rho, temp, ye, optd);
+  } else {
+    return eos->eps_from_rho_temp_ye(rho, temp, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_eps_from_rho_press(const EOSType *eos, const CCTK_REAL rho,
+                       const CCTK_REAL press, const CCTK_REAL ye,
+                       const CCTK_REAL optd) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->eps_from_rho_press_ye_tau(rho, press, ye, optd);
+  } else {
+    return eos->eps_from_rho_press_ye(rho, press, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_temp_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
+                      const CCTK_REAL ye, const CCTK_REAL optd) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->temp_from_rho_eps_ye_tau(rho, eps, ye, optd);
+  } else {
+    return eos->temp_from_rho_eps_ye(rho, eps, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_press_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
+                       const CCTK_REAL ye, const CCTK_REAL optd) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->press_from_rho_eps_ye_tau(rho, eps, ye, optd);
+  } else {
+    return eos->press_from_rho_eps_ye(rho, eps, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_kappa_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
+                       const CCTK_REAL ye, const CCTK_REAL optd) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->kappa_from_rho_eps_ye_tau(rho, eps, ye, optd);
+  } else {
+    return eos->kappa_from_rho_eps_ye(rho, eps, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_csnd_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
+                       const CCTK_REAL temp, const CCTK_REAL ye,
+                       const CCTK_REAL optd) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->csnd_from_rho_temp_ye_tau(rho, temp, ye, optd);
+  } else {
+    return eos->csnd_from_rho_temp_ye(rho, temp, ye);
+  }
 }
 
 } // namespace AsterX
