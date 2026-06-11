@@ -52,10 +52,10 @@ inline Loop::GF3D2<const CCTK_REAL> leakage_optd_gf(const cGH *cctkGH) {
       layout, static_cast<const CCTK_REAL *>(CCTK_VarDataPtrI(cctkGH, 0, vi)));
 }
 
-template <typename EOSType>
+template <typename EOSType, typename T>
 inline Loop::GF3D2<const CCTK_REAL>
 optional_leakage_optd_gf(const cGH *cctkGH,
-                         const Loop::GF3D2<CCTK_REAL> &reference) {
+                         const Loop::GF3D2<T> &reference) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
     return leakage_optd_gf(cctkGH);
   } else {
