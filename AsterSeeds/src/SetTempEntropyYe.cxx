@@ -12,7 +12,7 @@
 #include <setup_eos.hxx>
 
 using namespace EOSX;
-enum class eos_3param { IdealGas, Hybrid, Tabulated };
+enum class eos_3param { IdealGas, RadIdealGas, Hybrid, Tabulated };
 
 template <typename EOSType>
 void SetTemp_typeEoS(CCTK_ARGUMENTS, EOSType *eos_3p) {
@@ -63,6 +63,8 @@ extern "C" void SetTemp(CCTK_ARGUMENTS) {
 
   if (CCTK_EQUALS(evolution_eos, "IdealGas")) {
     eos_3p_type = eos_3param::IdealGas;
+  } else if (CCTK_EQUALS(evolution_eos, "Rad_idealgas")) {
+    eos_3p_type = eos_3param::RadIdealGas;
   } else if (CCTK_EQUALS(evolution_eos, "Hybrid")) {
     eos_3p_type = eos_3param::Hybrid;
   } else if (CCTK_EQUALS(evolution_eos, "Tabulated3d")) {
@@ -75,6 +77,11 @@ extern "C" void SetTemp(CCTK_ARGUMENTS) {
   case eos_3param::IdealGas: {
     auto eos_3p_ig = global_eos_3p_ig;
     SetTemp_typeEoS(CCTK_PASS_CTOC, eos_3p_ig);
+    break;
+  }
+  case eos_3param::RadIdealGas: {
+    auto eos_3p_rad_ig = global_eos_3p_rad_ig;
+    SetTemp_typeEoS(CCTK_PASS_CTOC, eos_3p_rad_ig);
     break;
   }
   case eos_3param::Hybrid: {
@@ -110,6 +117,8 @@ extern "C" void SetEntropy(CCTK_ARGUMENTS) {
 
   if (CCTK_EQUALS(evolution_eos, "IdealGas")) {
     eos_3p_type = eos_3param::IdealGas;
+  } else if (CCTK_EQUALS(evolution_eos, "Rad_idealgas")) {
+    eos_3p_type = eos_3param::RadIdealGas;
   } else if (CCTK_EQUALS(evolution_eos, "Hybrid")) {
     eos_3p_type = eos_3param::Hybrid;
   } else if (CCTK_EQUALS(evolution_eos, "Tabulated3d")) {
@@ -122,6 +131,11 @@ extern "C" void SetEntropy(CCTK_ARGUMENTS) {
   case eos_3param::IdealGas: {
     auto eos_3p_ig = global_eos_3p_ig;
     SetEntropy_typeEoS(CCTK_PASS_CTOC, eos_3p_ig);
+    break;
+  }
+  case eos_3param::RadIdealGas: {
+    auto eos_3p_rad_ig = global_eos_3p_rad_ig;
+    SetEntropy_typeEoS(CCTK_PASS_CTOC, eos_3p_rad_ig);
     break;
   }
   case eos_3param::Hybrid: {
