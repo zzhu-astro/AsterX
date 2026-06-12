@@ -84,10 +84,6 @@ BOOLEAN debug_mode "Print debug information if set to yes" STEERABLE=always
 {
 } no
 
-BOOLEAN preserve_conservatives_after_c2p "Debug mode: keep conservative variables unchanged after Con2Prim write-back" STEERABLE=always
-{
-} no
-
 BOOLEAN unit_test "turn on all the unit tests if set to yes" STEERABLE=always
 {
 } no

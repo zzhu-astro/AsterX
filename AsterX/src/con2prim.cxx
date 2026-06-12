@@ -292,7 +292,6 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
     cons_vars cv{dens(p.I), {momx(p.I), momy(p.I), momz(p.I)},
                  tau(p.I),  DYe(p.I),
                  DEnt(p.I), {dBx(p.I), dBy(p.I), dBz(p.I)}};
-    const cons_vars cv_input = cv;
 
     // Undensitized magnetic fields
     const vec<CCTK_REAL, 3> Bup{cv.dBvec(0) / sqrt_detg,
@@ -571,13 +570,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
         (pv.rho + pv.rho * pv.eps + pv.press) * wlor * wlor * pv.vel(2);
 
     // Write back cv
-    if (preserve_conservatives_after_c2p) {
-      cv_input.scatter(dens(p.I), momx(p.I), momy(p.I), momz(p.I), tau(p.I),
-                       DYe(p.I), DEnt(p.I), dBx(p.I), dBy(p.I), dBz(p.I));
-    } else {
-      cv.scatter(dens(p.I), momx(p.I), momy(p.I), momz(p.I), tau(p.I),
-                 DYe(p.I), DEnt(p.I), dBx(p.I), dBy(p.I), dBz(p.I));
-    }
+    cv.scatter(dens(p.I), momx(p.I), momy(p.I), momz(p.I), tau(p.I), DYe(p.I),
+               DEnt(p.I), dBx(p.I), dBy(p.I), dBz(p.I));
 
     // Update saved prims
     saved_rho(p.I) = rho(p.I);
