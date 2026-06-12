@@ -49,15 +49,16 @@ private:
     const CCTK_REAL rho = cv.dens * q;
     const CCTK_REAL erad = eos_3p->rad_energy_density(temp, tau_opt);
     const CCTK_REAL press = rho * temp + erad / CCTK_REAL(3.0);
+    const CCTK_REAL q2 = CCTK_REAL(1.0) - Vsq;
 
     r[0] = Ssq - Vsq * (Bsq + Zloc) * (Bsq + Zloc) +
            BiSi * BiSi * invZ * invZ * (Bsq + CCTK_REAL(2.0) * Zloc);
     r[1] = cv.tau + cv.dens - CCTK_REAL(0.5) * Bsq *
                                       (CCTK_REAL(1.0) + Vsq) +
            CCTK_REAL(0.5) * BiSi * BiSi * invZ * invZ - Zloc + press;
-    r[2] = Zloc * (CCTK_REAL(1.0) - Vsq) - cv.dens * q -
-           eos_3p->gamma * rho * temp / eos_3p->gm1 -
-           CCTK_REAL(4.0) * erad / CCTK_REAL(3.0);
+    r[2] = Zloc * q2 / rho - CCTK_REAL(1.0) -
+           eos_3p->gamma * temp / eos_3p->gm1 -
+           CCTK_REAL(4.0) * erad / (CCTK_REAL(3.0) * rho);
   }
 
   template <typename EOSType>
@@ -79,6 +80,9 @@ private:
     const CCTK_REAL pref = eos_3p->rad_prefactor(tau_opt);
     const CCTK_REAL temp2 = temp * temp;
     const CCTK_REAL temp3 = temp2 * temp;
+    const CCTK_REAL temp4 = temp2 * temp2;
+    const CCTK_REAL erad = pref * temp4;
+    const CCTK_REAL q2 = CCTK_REAL(1.0) - Vsq;
 
     const CCTK_REAL dP_dvsq = temp * drho_dvsq;
     const CCTK_REAL dP_dtemp =
@@ -93,12 +97,14 @@ private:
     J[1][1] = -CCTK_REAL(0.5) * Bsq + dP_dvsq;
     J[1][2] = dP_dtemp;
 
-    J[2][0] = CCTK_REAL(1.0) - Vsq;
-    J[2][1] = -Zloc + cv.dens / (CCTK_REAL(2.0) * q) +
-              eos_3p->gamma * temp * cv.dens /
-                  (CCTK_REAL(2.0) * eos_3p->gm1 * q);
-    J[2][2] = -eos_3p->gamma * rho / eos_3p->gm1 -
-              CCTK_REAL(16.0) * pref * temp3 / CCTK_REAL(3.0);
+    J[2][0] = q2 / rho;
+    J[2][1] =
+        -Zloc / (CCTK_REAL(2.0) * rho) +
+        CCTK_REAL(4.0) * erad * drho_dvsq /
+            (CCTK_REAL(3.0) * rho * rho);
+    J[2][2] = -eos_3p->gamma / eos_3p->gm1 -
+              CCTK_REAL(16.0) * pref * temp3 /
+                  (CCTK_REAL(3.0) * rho);
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline bool
