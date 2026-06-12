@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <cmath>
 
-#include "lk_const.hxx"
-
 #include "../eos_3p.hxx"
 
 namespace EOSX {
@@ -14,6 +12,8 @@ class eos_3p_rad_idealgas : public eos_3p {
 public:
   CCTK_REAL gamma, gm1, inv_gamma, temp_over_eps;
   CCTK_REAL arad_code, n_tau;
+  CCTK_REAL radeos_time, t_leakage;
+  CCTK_INT smooth_radeos;
   range rgeps;
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
@@ -25,6 +25,9 @@ public:
     temp_over_eps = gm1;
     arad_code = arad_code_;
     n_tau = n_tau_;
+    radeos_time = CCTK_REAL(0.0);
+    t_leakage = CCTK_REAL(0.0);
+    smooth_radeos = 0;
     rgeps = rgeps_;
     if (gamma <= 1.0) {
       printf("EOS_RadIdealGas: initialized with gamma <= 1.\n");
@@ -39,12 +42,28 @@ public:
     set_range_temp(range(temp_over_eps * rgeps.min, temp_over_eps * rgeps.max));
   }
 
+  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+  set_radeos_ramp(const CCTK_REAL cctk_time_, const CCTK_INT smooth_radeos_,
+                  const CCTK_REAL t_leakage_) {
+    radeos_time = cctk_time_;
+    smooth_radeos = smooth_radeos_;
+    t_leakage = t_leakage_;
+  }
+
+  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
+  rad_factor_from_time() const {
+    if (!smooth_radeos)
+      return CCTK_REAL(1.0);
+    return fmin(fmax(radeos_time / (t_leakage + CCTK_REAL(1.0e-15)),
+                     CCTK_REAL(0.0)),
+                CCTK_REAL(1.0));
+  }
+
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   rad_prefactor(const CCTK_REAL tau_opt) const {
     const CCTK_REAL tau_pos = fmax(CCTK_REAL(0.0), tau_opt);
     const CCTK_REAL tau_factor = tau_pos / (tau_pos + CCTK_REAL(1.0));
-    const CCTK_REAL rad_factor = lkx_constants::runtime_constants().rad_factor;
-    return rad_factor * pow(tau_factor, n_tau) * arad_code;
+    return rad_factor_from_time() * pow(tau_factor, n_tau) * arad_code;
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
