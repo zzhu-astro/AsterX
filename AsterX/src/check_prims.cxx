@@ -272,6 +272,15 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
         }
 
         // ---------- End of validity check
+	
+	printf("CheckPrims final: it=%d x=%20.15e y=%20.15e z=%20.15e "
+       "rho=%20.15e eps=%20.15e press=%20.15e temp=%20.15e "
+       "epsmin=%20.15e epsmax=%20.15e eps_atm=%20.15e press_atm=%20.15e optd=%20.15e\n",
+       cctk_iteration, p.x, p.y, p.z,
+       rhoL, epsL, pressL, tempL,
+       epsmin, epsmax, eps_atm, press_atm, optd_local);
+
+
 
         rho(p.I) = rhoL;
         velx(p.I) = v_up(0);

@@ -103,7 +103,10 @@ public:
                            const CCTK_REAL ye,
                            const CCTK_REAL tau_opt) const {
     const CCTK_REAL pref = rad_prefactor(tau_opt);
-    CCTK_REAL temp = fmax(gm1 * eps, rgtemp.min);
+    const CCTK_REAL temp_gas = gm1 * eps;
+    const CCTK_REAL temp_rad = pow(eps * rho / pref, CCTK_REAL(0.25));
+    CCTK_REAL temp = fmin(temp_gas, temp_rad);
+
     for (int n = 0; n < 20; ++n) {
       const CCTK_REAL t2 = temp * temp;
       const CCTK_REAL t3 = t2 * temp;
@@ -124,7 +127,9 @@ public:
                              const CCTK_REAL ye,
                              const CCTK_REAL tau_opt) const {
     const CCTK_REAL pref = rad_prefactor(tau_opt);
-    CCTK_REAL temp = fmax(press / rho, rgtemp.min);
+    const CCTK_REAL temp_gas = press / fmax(rho, CCTK_REAL(1.0e-300));
+    const CCTK_REAL temp_rad = pow(CCTK_REAL(3.0) * press / pref, CCTK_REAL(0.25));
+    CCTK_REAL temp = fmin(temp_gas, temp_rad);
     for (int n = 0; n < 20; ++n) {
       const CCTK_REAL t2 = temp * temp;
       const CCTK_REAL t3 = t2 * temp;
