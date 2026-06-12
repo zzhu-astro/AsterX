@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "lk_const.hxx"
+
 #include "../eos_3p.hxx"
 
 namespace EOSX {
@@ -11,21 +13,25 @@ namespace EOSX {
 class eos_3p_rad_idealgas : public eos_3p {
 public:
   CCTK_REAL gamma, gm1, inv_gamma, temp_over_eps;
-  CCTK_REAL arad_code, rad_factor;
+  CCTK_REAL arad_code, n_tau;
   range rgeps;
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
-  init(CCTK_REAL gamma_, CCTK_REAL arad_code_, CCTK_REAL rad_factor_,
+  init(CCTK_REAL gamma_, CCTK_REAL arad_code_, CCTK_REAL n_tau_,
        range &rgeps_, const range &rgrho_, const range &rgye_) {
     gamma = gamma_;
     gm1 = gamma_ - 1.0;
     inv_gamma = 1.0 / gamma_;
     temp_over_eps = gm1;
     arad_code = arad_code_;
-    rad_factor = rad_factor_;
+    n_tau = n_tau_;
     rgeps = rgeps_;
     if (gamma <= 1.0) {
       printf("EOS_RadIdealGas: initialized with gamma <= 1.\n");
+      assert(false);
+    }
+    if (n_tau < CCTK_REAL(2.0)) {
+      printf("EOS_RadIdealGas: initialized with n_tau < 2.\n");
       assert(false);
     }
     set_range_rho(rgrho_);
@@ -36,7 +42,9 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   rad_prefactor(const CCTK_REAL tau_opt) const {
     const CCTK_REAL tau_pos = fmax(CCTK_REAL(0.0), tau_opt);
-    return rad_factor * tau_pos / (tau_pos + CCTK_REAL(1.0)) * arad_code;
+    const CCTK_REAL tau_factor = tau_pos / (tau_pos + CCTK_REAL(1.0));
+    const CCTK_REAL rad_factor = lkx_constants::runtime_constants().rad_factor;
+    return rad_factor * pow(tau_factor, n_tau) * arad_code;
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL

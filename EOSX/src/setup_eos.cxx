@@ -190,13 +190,13 @@ extern "C" void EOSX_Setup_EOS(CCTK_ARGUMENTS) {
                  "LeakageBaseX.");
     }
     const CCTK_REAL arad_code = rad_a_constant_from_leakage_units();
-    const CCTK_REAL rad_factor = lkx_constants::runtime_constants().rad_factor;
+    const CCTK_REAL n_tau = lkx_constants::runtime_constants().n_tau;
     global_eos_3p_rad_ig =
         (eos_3p_rad_idealgas *)The_Managed_Arena()->alloc(
             sizeof *global_eos_3p_rad_ig);
     assert(global_eos_3p_rad_ig);
     new (global_eos_3p_rad_ig) eos_3p_rad_idealgas;
-    global_eos_3p_rad_ig->init(gl_gamma, arad_code, rad_factor, rgeps, rgrho,
+    global_eos_3p_rad_ig->init(gl_gamma, arad_code, n_tau, rgeps, rgrho,
                                rgye);
     break;
   }
