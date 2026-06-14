@@ -3,9 +3,11 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <type_traits>
 
 #include <cctk.h>
+#include <cctk_Parameters.h>
 #include <util_Table.h>
 
 #include <loop_device.hxx>
@@ -13,6 +15,42 @@
 #include "setup_eos.hxx"
 
 namespace AsterX {
+
+inline CCTK_REAL leakage_radeos_ramp(const CCTK_REAL cctk_time) {
+  if (!CCTK_IsThornActive("LeakageBaseX"))
+    CCTK_ERROR("Rad_idealgas requires active LeakageBaseX.");
+
+  int smooth_type;
+  const void *const smooth_p =
+      CCTK_ParameterGet("smooth_radeos", "LeakageBaseX", &smooth_type);
+  if (smooth_p == nullptr || smooth_type != PARAMETER_BOOLEAN)
+    CCTK_ERROR("Could not read LeakageBaseX::smooth_radeos.");
+
+  const CCTK_INT smooth_radeos =
+      *static_cast<const CCTK_INT *>(smooth_p);
+  if (!smooth_radeos)
+    return CCTK_REAL(1.0);
+
+  int t_type;
+  const void *const t_p =
+      CCTK_ParameterGet("t_leakage", "LeakageBaseX", &t_type);
+  if (t_p == nullptr || t_type != PARAMETER_REAL)
+    CCTK_ERROR("Could not read LeakageBaseX::t_leakage.");
+
+  const CCTK_REAL t_leakage = *static_cast<const CCTK_REAL *>(t_p);
+  return fmin(fmax(cctk_time / (t_leakage + CCTK_REAL(1.0e-15)),
+                   CCTK_REAL(0.0)),
+              CCTK_REAL(1.0));
+}
+
+template <typename EOSType>
+inline CCTK_REAL optional_radeos_ramp(const CCTK_REAL cctk_time) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return leakage_radeos_ramp(cctk_time);
+  } else {
+    return CCTK_REAL(1.0);
+  }
+}
 
 inline std::array<int, Loop::dim> group_indextype(const int gi) {
   assert(gi >= 0);
@@ -78,9 +116,10 @@ template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_press_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
                         const CCTK_REAL temp, const CCTK_REAL ye,
-                        const CCTK_REAL optd) {
+                        const CCTK_REAL optd,
+                        const CCTK_REAL rad_ramp) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->press_from_rho_temp_ye_tau(rho, temp, ye, optd);
+    return eos->press_from_rho_temp_ye_tau(rho, temp, ye, optd, rad_ramp);
   } else {
     return eos->press_from_rho_temp_ye(rho, temp, ye);
   }
@@ -90,9 +129,10 @@ template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_eps_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
                       const CCTK_REAL temp, const CCTK_REAL ye,
-                      const CCTK_REAL optd) {
+                      const CCTK_REAL optd,
+                      const CCTK_REAL rad_ramp) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->eps_from_rho_temp_ye_tau(rho, temp, ye, optd);
+    return eos->eps_from_rho_temp_ye_tau(rho, temp, ye, optd, rad_ramp);
   } else {
     return eos->eps_from_rho_temp_ye(rho, temp, ye);
   }
@@ -102,9 +142,10 @@ template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_eps_from_rho_press(const EOSType *eos, const CCTK_REAL rho,
                        const CCTK_REAL press, const CCTK_REAL ye,
-                       const CCTK_REAL optd) {
+                       const CCTK_REAL optd,
+                       const CCTK_REAL rad_ramp) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->eps_from_rho_press_ye_tau(rho, press, ye, optd);
+    return eos->eps_from_rho_press_ye_tau(rho, press, ye, optd, rad_ramp);
   } else {
     return eos->eps_from_rho_press_ye(rho, press, ye);
   }
@@ -113,9 +154,10 @@ eos_eps_from_rho_press(const EOSType *eos, const CCTK_REAL rho,
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_temp_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
-                      const CCTK_REAL ye, const CCTK_REAL optd) {
+                      const CCTK_REAL ye, const CCTK_REAL optd,
+                      const CCTK_REAL rad_ramp) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->temp_from_rho_eps_ye_tau(rho, eps, ye, optd);
+    return eos->temp_from_rho_eps_ye_tau(rho, eps, ye, optd, rad_ramp);
   } else {
     return eos->temp_from_rho_eps_ye(rho, eps, ye);
   }
@@ -124,9 +166,10 @@ eos_temp_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_press_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
-                       const CCTK_REAL ye, const CCTK_REAL optd) {
+                       const CCTK_REAL ye, const CCTK_REAL optd,
+                       const CCTK_REAL rad_ramp) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->press_from_rho_eps_ye_tau(rho, eps, ye, optd);
+    return eos->press_from_rho_eps_ye_tau(rho, eps, ye, optd, rad_ramp);
   } else {
     return eos->press_from_rho_eps_ye(rho, eps, ye);
   }
@@ -135,9 +178,10 @@ eos_press_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_kappa_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
-                       const CCTK_REAL ye, const CCTK_REAL optd) {
+                       const CCTK_REAL ye, const CCTK_REAL optd,
+                       const CCTK_REAL rad_ramp) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->kappa_from_rho_eps_ye_tau(rho, eps, ye, optd);
+    return eos->kappa_from_rho_eps_ye_tau(rho, eps, ye, optd, rad_ramp);
   } else {
     return eos->kappa_from_rho_eps_ye(rho, eps, ye);
   }
@@ -147,9 +191,10 @@ template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_csnd_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
                        const CCTK_REAL temp, const CCTK_REAL ye,
-                       const CCTK_REAL optd) {
+                       const CCTK_REAL optd,
+                       const CCTK_REAL rad_ramp) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->csnd_from_rho_temp_ye_tau(rho, temp, ye, optd);
+    return eos->csnd_from_rho_temp_ye_tau(rho, temp, ye, optd, rad_ramp);
   } else {
     return eos->csnd_from_rho_temp_ye(rho, temp, ye);
   }

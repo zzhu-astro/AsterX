@@ -21,8 +21,9 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
   DECLARE_CCTK_ARGUMENTSX_AsterX_CheckPrims;
   DECLARE_CCTK_PARAMETERS;
 
-  const GF3D2<const CCTK_REAL> optd =
-      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
+	  const GF3D2<const CCTK_REAL> optd =
+	      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
+	  const CCTK_REAL rad_ramp = optional_radeos_ramp<EOSType>(cctk_time);
 
   // Loop over the entire grid (0 to n-1 cells in each direction)
   grid.loop_all_device<1, 1, 1>(
@@ -44,38 +45,38 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
         const auto press_from_rho_temp =
             [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
                 const CCTK_REAL ye_) ARITH_INLINE {
-              return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_,
-                                             optd_local);
+	              return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_,
+	                                             optd_local, rad_ramp);
             };
         const auto eps_from_rho_temp =
             [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
                 const CCTK_REAL ye_) ARITH_INLINE {
-              return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_,
-                                           optd_local);
+	              return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_,
+	                                           optd_local, rad_ramp);
             };
         const auto eps_from_rho_press =
             [&](const CCTK_REAL rho_, const CCTK_REAL press_,
                 const CCTK_REAL ye_) ARITH_INLINE {
-              return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_,
-                                            optd_local);
+	              return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_,
+	                                            optd_local, rad_ramp);
             };
         const auto temp_from_rho_eps =
             [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
                 const CCTK_REAL ye_) ARITH_INLINE {
-              return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_,
-                                           optd_local);
+	              return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                           optd_local, rad_ramp);
             };
         const auto press_from_rho_eps =
             [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
                 const CCTK_REAL ye_) ARITH_INLINE {
-              return eos_press_from_rho_eps(eos_3p, rho_, eps_, ye_,
-                                            optd_local);
+	              return eos_press_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                            optd_local, rad_ramp);
             };
         const auto entropy_from_rho_eps =
             [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
                 const CCTK_REAL ye_) ARITH_INLINE {
-              return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_,
-                                            optd_local);
+	              return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                            optd_local, rad_ramp);
             };
         // Consistent entropy
         CCTK_REAL entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);

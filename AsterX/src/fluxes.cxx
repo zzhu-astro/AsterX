@@ -102,8 +102,9 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
                                           vbar_y_zface};
   const vec<GF3D2<CCTK_REAL>, dim> ap_face{amax_xface, amax_yface, amax_zface};
   const vec<GF3D2<CCTK_REAL>, dim> am_face{amin_xface, amin_yface, amin_zface};
-  const GF3D2<const CCTK_REAL> optd =
-      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
+	  const GF3D2<const CCTK_REAL> optd =
+	      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
+	  const CCTK_REAL rad_ramp = optional_radeos_ramp<EOSType>(cctk_time);
 
   /* grid functions for PP flux limiter */
   const vec<GF3D2<CCTK_REAL>, dim> gf_theta{theta_x, theta_y, theta_z};
@@ -230,34 +231,40 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
 
     const auto press_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
-            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-          return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_);
-        };
+	            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
+	          return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_,
+	                                         rad_ramp);
+	        };
     const auto eps_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
-            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-          return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_);
-        };
+	            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
+	          return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_,
+	                                       rad_ramp);
+	        };
     const auto eps_from_rho_press =
         [&](const CCTK_REAL rho_, const CCTK_REAL press_,
-            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-          return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_, optd_);
-        };
+	            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
+	          return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_, optd_,
+	                                        rad_ramp);
+	        };
     const auto temp_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
-            const CCTK_REAL optd_) ARITH_INLINE {
-          return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_);
-        };
+	            const CCTK_REAL optd_) ARITH_INLINE {
+	          return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_,
+	                                       rad_ramp);
+	        };
     const auto entropy_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
-            const CCTK_REAL optd_) ARITH_INLINE {
-          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_);
-        };
+	            const CCTK_REAL optd_) ARITH_INLINE {
+	          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_,
+	                                        rad_ramp);
+	        };
     const auto csnd_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_, const CCTK_REAL ye_,
-            const CCTK_REAL optd_) ARITH_INLINE {
-          return eos_csnd_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_);
-        };
+	            const CCTK_REAL optd_) ARITH_INLINE {
+	          return eos_csnd_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_,
+	                                        rad_ramp);
+	        };
 
     // Setting up atmosphere for two neighboring cell centers
     vec<CCTK_REAL, 2> r_atm;

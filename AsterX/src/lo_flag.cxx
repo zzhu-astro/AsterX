@@ -57,8 +57,9 @@ void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
   const smat<GF3D2<const CCTK_REAL>, dim> gf_g{gxx, gxy, gxz, gyy, gyz, gzz};
   const vec<GF3D2<const CCTK_REAL>, dim> gf_vels{velx, vely, velz};
   const vec<GF3D2<const CCTK_REAL>, dim> gf_Bvecs{Bvecx, Bvecy, Bvecz};
-  const GF3D2<const CCTK_REAL> optd =
-      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
+	  const GF3D2<const CCTK_REAL> optd =
+	      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
+	  const CCTK_REAL rad_ramp = optional_radeos_ramp<EOSType>(cctk_time);
 
   // Loop over the grid
   grid.loop_int_device<1, 1, 1>(
@@ -95,8 +96,9 @@ void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
 
         // Calculate c_sound
         const CCTK_REAL optd_local = local_optd<EOSType>(optd, p.I);
-        const CCTK_REAL cs = eos_csnd_from_rho_temp(
-            eos_3p, rho(p.I), temperature(p.I), Ye(p.I), optd_local);
+	        const CCTK_REAL cs = eos_csnd_from_rho_temp(
+	            eos_3p, rho(p.I), temperature(p.I), Ye(p.I), optd_local,
+	            rad_ramp);
 
         // Check velocity
         for (int dir = 0; dir < 3; dir++) {
