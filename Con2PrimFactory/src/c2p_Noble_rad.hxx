@@ -37,6 +37,15 @@ public:
 private:
   template <typename EOSType>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+  prims_floors_and_ceilings_tau(const EOSType *eos_3p, prim_vars &pv,
+                                const cons_vars &cv, const CCTK_REAL alp,
+                                const vec<CCTK_REAL, 3> &beta,
+                                const smat<CCTK_REAL, 3> &glo,
+                                const CCTK_REAL tau_opt,
+                                c2p_report &rep) const;
+
+  template <typename EOSType>
+  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
   residual(const EOSType *eos_3p, const cons_vars &cv, const CCTK_REAL Ssq,
            const CCTK_REAL Bsq, const CCTK_REAL BiSi,
            const CCTK_REAL tau_opt, const CCTK_REAL x[3],
@@ -225,6 +234,203 @@ private:
   }
 };
 
+template <typename EOSType>
+CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+c2p_Noble_rad::prims_floors_and_ceilings_tau(
+    const EOSType *eos_3p, prim_vars &pv, const cons_vars &cv,
+    const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
+    const smat<CCTK_REAL, 3> &glo, const CCTK_REAL tau_opt,
+    c2p_report &rep) const {
+
+  bool recomp_eps_press_entropy = false;
+
+  const CCTK_REAL rho_h_fluid_old = pv.rho + pv.rho * pv.eps + pv.press;
+
+  if (pv.Ye < eos_3p->rgye.min) {
+    pv.Ye = eos_3p->rgye.min;
+    rep.adjust_cons = true;
+    recomp_eps_press_entropy = true;
+  }
+
+  if (pv.Ye > eos_3p->rgye.max) {
+    pv.Ye = eos_3p->rgye.max;
+    rep.adjust_cons = true;
+    recomp_eps_press_entropy = true;
+  }
+
+  vec<CCTK_REAL, 3> v_low = calc_contraction(glo, pv.vel);
+  CCTK_REAL vsq_Sol = calc_contraction(v_low, pv.vel);
+  CCTK_REAL sol_v = sqrt(vsq_Sol);
+
+  if (sol_v > v_lim) {
+    pv.rho = cv.dens / w_lim;
+    pv.vel *= v_lim / sol_v;
+    pv.w_lor = w_lim;
+    rep.adjust_cons = true;
+
+    if (use_temp) {
+      recomp_eps_press_entropy = true;
+    } else {
+      recomp_eps_press_entropy = false;
+      pv.eps =
+          eos_3p->eps_from_rho_press_ye_tau(pv.rho, pv.press, pv.Ye, tau_opt);
+      pv.temperature =
+          eos_3p->temp_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+      pv.entropy =
+          eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+    }
+  }
+
+  if (pv.rho > eos_3p->rgrho.max) {
+    pv.rho = eos_3p->rgrho.max;
+    rep.adjust_cons = true;
+
+    if (use_temp) {
+      recomp_eps_press_entropy = true;
+    } else {
+      recomp_eps_press_entropy = false;
+      pv.eps =
+          eos_3p->eps_from_rho_press_ye_tau(pv.rho, pv.press, pv.Ye, tau_opt);
+      pv.temperature =
+          eos_3p->temp_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+      pv.entropy =
+          eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+    }
+  }
+
+  if (pv.temperature > eos_3p->rgtemp.max) {
+    pv.temperature = eos_3p->rgtemp.max;
+    recomp_eps_press_entropy = true;
+    rep.adjust_cons = true;
+  }
+
+  if (use_press_atmo) {
+    if (pv.press < atmo.press_atmo) {
+      pv.press = atmo.press_atmo;
+      pv.eps =
+          eos_3p->eps_from_rho_press_ye_tau(pv.rho, pv.press, pv.Ye, tau_opt);
+      pv.temperature =
+          eos_3p->temp_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+      pv.entropy =
+          eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+      recomp_eps_press_entropy = false;
+      rep.adjust_cons = true;
+    }
+  } else {
+    if (pv.temperature < atmo.temp_atmo) {
+      pv.temperature = atmo.temp_atmo;
+      recomp_eps_press_entropy = true;
+      rep.adjust_cons = true;
+    }
+  }
+
+  if (recomp_eps_press_entropy) {
+    pv.eps =
+        eos_3p->eps_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
+                                         tau_opt);
+    pv.press =
+        eos_3p->press_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
+                                           tau_opt);
+    pv.entropy =
+        eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+    recomp_eps_press_entropy = false;
+  }
+
+  v_low = calc_contraction(glo, pv.vel);
+  const vec<CCTK_REAL, 3> B_low = calc_contraction(glo, pv.Bvec);
+
+  const CCTK_REAL Bdotv = calc_contraction(pv.Bvec, v_low);
+  const CCTK_REAL alp_b0 = pv.w_lor * Bdotv;
+
+  const CCTK_REAL B2 = calc_contraction(pv.Bvec, B_low);
+  const CCTK_REAL bsq = (B2 + alp_b0 * alp_b0) / (pv.w_lor * pv.w_lor);
+
+  bool mag_ceiling = false;
+
+  if (bsq > sigma_max * pv.rho) {
+    pv.rho = bsq / sigma_max;
+    mag_ceiling = true;
+  }
+
+  if (bsq > CCTK_REAL(2.0) * inv_beta_max * pv.press) {
+    pv.press = CCTK_REAL(0.5) * bsq / inv_beta_max;
+    mag_ceiling = true;
+  }
+
+  if (mag_ceiling) {
+
+    rep.adjust_cons = true;
+
+    if (use_temp) {
+      pv.temperature =
+          eos_3p->temp_from_rho_press_ye_tau(pv.rho, pv.press, pv.Ye,
+                                             tau_opt);
+      pv.eps =
+          eos_3p->eps_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
+                                           tau_opt);
+      pv.entropy =
+          eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+    } else {
+      pv.eps =
+          eos_3p->eps_from_rho_press_ye_tau(pv.rho, pv.press, pv.Ye, tau_opt);
+      pv.temperature =
+          eos_3p->temp_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+      pv.entropy =
+          eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, tau_opt);
+    }
+
+    const CCTK_REAL B = fmax(sqrt(B2), CCTK_REAL(1.0e-64));
+
+    const CCTK_REAL ut = pv.w_lor / alp;
+
+    const CCTK_REAL u1 = pv.w_lor * (pv.vel(0) - beta(0) / alp);
+    const CCTK_REAL u2 = pv.w_lor * (pv.vel(1) - beta(1) / alp);
+    const CCTK_REAL u3 = pv.w_lor * (pv.vel(2) - beta(2) / alp);
+
+    const CCTK_REAL v_par_old = pv.w_lor * Bdotv / B / ut;
+
+    const CCTK_REAL ut_perp =
+        CCTK_REAL(1.0) /
+        sqrt(CCTK_REAL(1.0) / (ut * ut) + v_par_old * v_par_old);
+
+    const CCTK_REAL u1_perp =
+        ut_perp * (u1 / ut - v_par_old * pv.Bvec(0) / B);
+    const CCTK_REAL u2_perp =
+        ut_perp * (u2 / ut - v_par_old * pv.Bvec(1) / B);
+    const CCTK_REAL u3_perp =
+        ut_perp * (u3 / ut - v_par_old * pv.Bvec(2) / B);
+
+    const CCTK_REAL BdotQ = pv.w_lor * rho_h_fluid_old * Bdotv * ut;
+
+    const CCTK_REAL rho_h_fluid_new = pv.rho + pv.rho * pv.eps + pv.press;
+
+    const CCTK_REAL xx =
+        CCTK_REAL(2.0) * BdotQ / (B * rho_h_fluid_new * ut_perp);
+
+    const CCTK_REAL v_par_new =
+        xx / (CCTK_REAL(1.0) + sqrt(CCTK_REAL(1.0) + xx * xx)) / ut_perp;
+
+    const CCTK_REAL v1_new = v_par_new * pv.Bvec(0) / B + u1_perp / ut_perp;
+    const CCTK_REAL v2_new = v_par_new * pv.Bvec(1) / B + u2_perp / ut_perp;
+    const CCTK_REAL v3_new = v_par_new * pv.Bvec(2) / B + u3_perp / ut_perp;
+
+    pv.vel(0) = (v1_new + beta(0)) / alp;
+    pv.vel(1) = (v2_new + beta(1)) / alp;
+    pv.vel(2) = (v3_new + beta(2)) / alp;
+
+    v_low = calc_contraction(glo, pv.vel);
+    vsq_Sol = calc_contraction(v_low, pv.vel);
+    sol_v = sqrt(vsq_Sol);
+
+    if (sol_v > v_lim) {
+      pv.vel *= v_lim / sol_v;
+      pv.w_lor = w_lim;
+    } else {
+      pv.w_lor = CCTK_REAL(1.0) / sqrt(CCTK_REAL(1.0) - vsq_Sol);
+    }
+  }
+}
+
 template <typename EOSType, bool limiting>
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
 c2p_Noble_rad::bh_interior_tau(const EOSType *eos_3p, prim_vars &pv,
@@ -384,7 +590,7 @@ c2p_Noble_rad::solve(const EOSType *eos_3p, prim_vars &pv,
   }
 
   pv_seeds.rho = cv.dens / pv_seeds.w_lor;
-  CCTK_REAL temp_seed = fmax(pv_seeds.temperature, atmo.temp_atmo);
+  CCTK_REAL temp_seed = pv_seeds.temperature;
   if ((!isfinite(temp_seed)) || temp_seed <= CCTK_REAL(0.0)) {
     temp_seed = fmax(eos_3p->gm1 * fmax(pv_seeds.eps, atmo.eps_atmo),
                      eos_3p->rgtemp.min);
@@ -479,37 +685,9 @@ c2p_Noble_rad::solve(const EOSType *eos_3p, prim_vars &pv,
     return;
   }
 
-  bool adjust_cons = false;
-  if (pv.Ye < eos_3p->rgye.min) {
-    pv.Ye = eos_3p->rgye.min;
-    adjust_cons = true;
-  }
-  if (pv.Ye > eos_3p->rgye.max) {
-    pv.Ye = eos_3p->rgye.max;
-    adjust_cons = true;
-  }
-  if (pv.rho > eos_3p->rgrho.max) {
-    pv.rho = eos_3p->rgrho.max;
-    adjust_cons = true;
-  }
-  if (pv.temperature > eos_3p->rgtemp.max) {
-    pv.temperature = eos_3p->rgtemp.max;
-    adjust_cons = true;
-  }
-  if (pv.temperature < atmo.temp_atmo) {
-    pv.temperature = atmo.temp_atmo;
-    adjust_cons = true;
-  }
+  prims_floors_and_ceilings_tau(eos_3p, pv, cv, alp, beta, glo, tau_opt, rep);
 
-  pv.eps =
-      eos_3p->eps_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye, tau_opt);
-  pv.press = eos_3p->press_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                                tau_opt);
-  pv.entropy = eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature,
-                                                  pv.Ye, tau_opt);
-
-  if (adjust_cons) {
-    rep.adjust_cons = true;
+  if (rep.adjust_cons) {
     cv.from_prim(pv, glo);
     cv.dBvec = cv_const.dBvec;
   } else {

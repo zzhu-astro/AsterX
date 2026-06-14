@@ -105,10 +105,13 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
                     ? (p_atmo * pow(r_atmo / radial_distance, n_press_atmo))
                     : p_atmo;
             press_atm = std::max(
-                press_from_rho_temp(rho_atm, eos_3p->rgtemp.min, Ye_atmo),
+                eos_3p->press_from_rho_temp_ye(rho_atm, eos_3p->rgtemp.min,
+                                               Ye_atmo),
                 press_atm);
-            eps_atm = eps_from_rho_press(rho_atm, press_atm, Ye_atmo);
-            temp_atm = temp_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
+            eps_atm =
+                eos_3p->eps_from_rho_press_ye(rho_atm, press_atm, Ye_atmo);
+            temp_atm =
+                eos_3p->temp_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
           } else {
             temp_atm =
                 (radial_distance > r_atmo)
@@ -116,8 +119,10 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
                     : t_atmo;
             temp_atm = std::max(eos_3p->rgtemp.min, temp_atm);
             // temp_atm = max(temp_atm, eos_3p->interptable->xmin<1>());
-            press_atm = press_from_rho_temp(rho_atm, temp_atm, Ye_atmo);
-            eps_atm = eps_from_rho_temp(rho_atm, temp_atm, Ye_atmo);
+            press_atm =
+                eos_3p->press_from_rho_temp_ye(rho_atm, temp_atm, Ye_atmo);
+            eps_atm =
+                eos_3p->eps_from_rho_temp_ye(rho_atm, temp_atm, Ye_atmo);
             // eps_atm should be kept consistent with temp_atm, so we do not use
             // the setting below
             // eps_atm =
@@ -129,15 +134,18 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
           const CCTK_REAL gm1 = eos_1p->gm1_from_rho(rho_atm);
           eps_atm = eos_1p->sed_from_gm1(gm1);
           eps_atm = std::max(
-              eps_from_rho_temp(rho_atm, eos_3p->rgtemp.min, Ye_atmo),
+              eos_3p->eps_from_rho_temp_ye(rho_atm, eos_3p->rgtemp.min,
+                                           Ye_atmo),
               eps_atm);
-          temp_atm = temp_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
+          temp_atm =
+              eos_3p->temp_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
           // eps_atm should be kept consistent with temp_atm, so we do not use
           // the setting below
           // eps_atm =
           //    std::min(std::max(eos_3p->rgeps.min, eps_atm),
           //    eos_3p->rgeps.max);
-          press_atm = press_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
+          press_atm =
+              eos_3p->press_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
         }
 
         const CCTK_REAL rho_atmo_cut = rho_atm * (1 + atmo_tol);
