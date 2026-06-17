@@ -28,10 +28,6 @@ public:
       printf("EOS_RadIdealGas: initialized with gamma <= 1.\n");
       assert(false);
     }
-    if (n_tau < CCTK_REAL(2.0)) {
-      printf("EOS_RadIdealGas: initialized with n_tau < 2.\n");
-      assert(false);
-    }
     set_range_rho(rgrho_);
     set_range_ye(rgye_);
     set_range_temp(range(temp_over_eps * rgeps.min, temp_over_eps * rgeps.max));
