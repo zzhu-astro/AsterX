@@ -102,7 +102,7 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
                                           vbar_y_zface};
   const vec<GF3D2<CCTK_REAL>, dim> ap_face{amax_xface, amax_yface, amax_zface};
   const vec<GF3D2<CCTK_REAL>, dim> am_face{amin_xface, amin_yface, amin_zface};
-	  const GF3D2<const CCTK_REAL> optd =
+	  const auto od_gfs =
 	      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
 	  const CCTK_REAL rad_ramp = optional_radeos_ramp<EOSType>(cctk_time);
 
@@ -225,44 +225,44 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
     vec<CCTK_REAL, 2> eps_rc;
     vec<CCTK_REAL, 2> press_rc;
     vec<CCTK_REAL, 2> temp_rc;
-    const vec<CCTK_REAL, 2> optd_rc{
-        local_optd<EOSType>(optd, p.I - p.DI[dir_i]),
-        local_optd<EOSType>(optd, p.I)};
+    const EOSX::optical_depths od_rc[2] = {
+        local_optd<EOSType>(od_gfs, p.I - p.DI[dir_i]),
+        local_optd<EOSType>(od_gfs, p.I)};
 
     const auto press_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
-	            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-	          return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_,
+	            const CCTK_REAL ye_, const EOSX::optical_depths &od_) ARITH_INLINE {
+	          return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_, od_,
 	                                         rad_ramp);
 	        };
     const auto eps_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
-	            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-	          return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_,
+	            const CCTK_REAL ye_, const EOSX::optical_depths &od_) ARITH_INLINE {
+	          return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_, od_,
 	                                       rad_ramp);
 	        };
     const auto eps_from_rho_press =
         [&](const CCTK_REAL rho_, const CCTK_REAL press_,
-	            const CCTK_REAL ye_, const CCTK_REAL optd_) ARITH_INLINE {
-	          return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_, optd_,
+	            const CCTK_REAL ye_, const EOSX::optical_depths &od_) ARITH_INLINE {
+	          return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_, od_,
 	                                        rad_ramp);
 	        };
     const auto temp_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
-	            const CCTK_REAL optd_) ARITH_INLINE {
-	          return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_,
+	            const EOSX::optical_depths &od_) ARITH_INLINE {
+	          return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_, od_,
 	                                       rad_ramp);
 	        };
     const auto entropy_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
-	            const CCTK_REAL optd_) ARITH_INLINE {
-	          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_, optd_,
+	            const EOSX::optical_depths &od_) ARITH_INLINE {
+	          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_, od_,
 	                                        rad_ramp);
 	        };
     const auto csnd_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_, const CCTK_REAL ye_,
-	            const CCTK_REAL optd_) ARITH_INLINE {
-	          return eos_csnd_from_rho_temp(eos_3p, rho_, temp_, ye_, optd_,
+	            const EOSX::optical_depths &od_) ARITH_INLINE {
+	          return eos_csnd_from_rho_temp(eos_3p, rho_, temp_, ye_, od_,
 	                                        rad_ramp);
 	        };
 
@@ -371,7 +371,7 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
         resetL = true;
         rho_rc(0) = rho_atm(0);
         entropy_rc(0) = entropy_from_rho_eps(rho_atm(0), eps_atm(0), Ye_atmo,
-                                             optd_rc(0));
+                                             od_rc[0]);
         temp_rc(0) = temp_atm(0);
         Ye_rc(0) = Ye_atmo;
       }
@@ -379,7 +379,7 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
         resetR = true;
         rho_rc(1) = rho_atm(1);
         entropy_rc(1) = entropy_from_rho_eps(rho_atm(1), eps_atm(1), Ye_atmo,
-                                             optd_rc(1));
+                                             od_rc[1]);
         temp_rc(1) = temp_atm(1);
         Ye_rc(1) = Ye_atmo;
       }
@@ -388,9 +388,9 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
       // Compute eps_rc and press_rc using lambdas
       for (int f = 0; f < 2; ++f) {
         eps_rc(f) =
-            eps_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), optd_rc(f));
+            eps_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), od_rc[f]);
         press_rc(f) =
-            press_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), optd_rc(f));
+            press_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), od_rc[f]);
       }
 
     } else {
@@ -417,7 +417,7 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
         resetL = true;
         rho_rc(0) = rho_atm(0);
         entropy_rc(0) = entropy_from_rho_eps(rho_atm(0), eps_atm(0), Ye_atmo,
-                                             optd_rc(0));
+                                             od_rc[0]);
         press_rc(0) = press_atm(0);
         Ye_rc(0) = Ye_atmo;
       }
@@ -425,7 +425,7 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
         resetR = true;
         rho_rc(1) = rho_atm(1);
         entropy_rc(1) = entropy_from_rho_eps(rho_atm(1), eps_atm(1), Ye_atmo,
-                                             optd_rc(1));
+                                             od_rc[1]);
         press_rc(1) = press_atm(1);
         Ye_rc(1) = Ye_atmo;
       }
@@ -434,9 +434,9 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
       // Compute eps_rc and temp_rc using lambdas
       for (int f = 0; f < 2; ++f) {
         eps_rc(f) =
-            eps_from_rho_press(rho_rc(f), press_rc(f), Ye_rc(f), optd_rc(f));
+            eps_from_rho_press(rho_rc(f), press_rc(f), Ye_rc(f), od_rc[f]);
         temp_rc(f) =
-            temp_from_rho_eps(rho_rc(f), eps_rc(f), Ye_rc(f), optd_rc(f));
+            temp_from_rho_eps(rho_rc(f), eps_rc(f), Ye_rc(f), od_rc[f]);
       }
     }
 
@@ -647,7 +647,7 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
 
     const vec<CCTK_REAL, 2> cs2_rc([&](int f) ARITH_INLINE {
       const CCTK_REAL cs =
-          csnd_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), optd_rc(f));
+          csnd_from_rho_temp(rho_rc(f), temp_rc(f), Ye_rc(f), od_rc[f]);
       return cs * cs;
     });
 

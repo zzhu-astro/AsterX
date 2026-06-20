@@ -57,7 +57,7 @@ void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
   const smat<GF3D2<const CCTK_REAL>, dim> gf_g{gxx, gxy, gxz, gyy, gyz, gzz};
   const vec<GF3D2<const CCTK_REAL>, dim> gf_vels{velx, vely, velz};
   const vec<GF3D2<const CCTK_REAL>, dim> gf_Bvecs{Bvecx, Bvecy, Bvecz};
-	  const GF3D2<const CCTK_REAL> optd =
+	  const auto od_gfs =
 	      optional_leakage_optd_gf<EOSType>(cctkGH, rho);
 	  const CCTK_REAL rad_ramp = optional_radeos_ramp<EOSType>(cctk_time);
 
@@ -95,9 +95,9 @@ void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
         }
 
         // Calculate c_sound
-        const CCTK_REAL optd_local = local_optd<EOSType>(optd, p.I);
+        const EOSX::optical_depths od_local = local_optd<EOSType>(od_gfs, p.I);
 	        const CCTK_REAL cs = eos_csnd_from_rho_temp(
-	            eos_3p, rho(p.I), temperature(p.I), Ye(p.I), optd_local,
+	            eos_3p, rho(p.I), temperature(p.I), Ye(p.I), od_local,
 	            rad_ramp);
 
         // Check velocity

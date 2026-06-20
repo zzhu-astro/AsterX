@@ -8,21 +8,27 @@
 
 namespace EOSX {
 
+// Bundle of the three optical depths consumed by the radiation prefactor.
+// POD (3 CCTK_REAL) -- safe to pass by value/const-ref inside device lambdas.
+struct optical_depths {
+  CCTK_REAL tot, emit, abs;
+};
+
 class eos_3p_rad_idealgas : public eos_3p {
 public:
   CCTK_REAL gamma, gm1, inv_gamma, temp_over_eps;
-  CCTK_REAL arad_code, n_tau;
+  CCTK_REAL arad_code, a_tau;     // emit/abs prefactor scale a_tau
   range rgeps;
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
-  init(CCTK_REAL gamma_, CCTK_REAL arad_code_, CCTK_REAL n_tau_,
+  init(CCTK_REAL gamma_, CCTK_REAL arad_code_, CCTK_REAL a_tau_,
        range &rgeps_, const range &rgrho_, const range &rgye_) {
     gamma = gamma_;
     gm1 = gamma_ - 1.0;
     inv_gamma = 1.0 / gamma_;
     temp_over_eps = gm1;
     arad_code = arad_code_;
-    n_tau = n_tau_;
+    a_tau = a_tau_;
     rgeps = rgeps_;
     if (gamma <= 1.0) {
       printf("EOS_RadIdealGas: initialized with gamma <= 1.\n");
@@ -34,16 +40,18 @@ public:
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
-  rad_prefactor(const CCTK_REAL tau_opt, const CCTK_REAL rad_ramp) const {
-    const CCTK_REAL tau_pos = fmax(CCTK_REAL(0.0), tau_opt);
-    const CCTK_REAL tau_factor = tau_pos / (tau_pos + CCTK_REAL(1.0));
-    const CCTK_REAL tau_weight = pow(tau_factor, n_tau);
-    return rad_ramp * tau_weight * arad_code;
+  rad_prefactor(const optical_depths &od, const CCTK_REAL rad_ramp) const {
+    const CCTK_REAL t  = fmax(CCTK_REAL(0.0), od.tot);
+    const CCTK_REAL te = fmax(CCTK_REAL(0.0), od.emit);
+    const CCTK_REAL ta = fmax(CCTK_REAL(0.0), od.abs);
+    const CCTK_REAL num = a_tau * t * te;
+    const CCTK_REAL den = CCTK_REAL(1.0) + a_tau * t * ta;   // >= 1
+    return rad_ramp * arad_code * (num / den);
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
-  rad_prefactor(const CCTK_REAL tau_opt) const {
-    return rad_prefactor(tau_opt, CCTK_REAL(1.0));
+  rad_prefactor(const optical_depths &od) const {
+    return rad_prefactor(od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -53,14 +61,14 @@ public:
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
-  rad_energy_density(const CCTK_REAL temp, const CCTK_REAL tau_opt,
+  rad_energy_density(const CCTK_REAL temp, const optical_depths &od,
                      const CCTK_REAL rad_ramp) const {
-    return rad_energy_density_pref(temp, rad_prefactor(tau_opt, rad_ramp));
+    return rad_energy_density_pref(temp, rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
-  rad_energy_density(const CCTK_REAL temp, const CCTK_REAL tau_opt) const {
-    return rad_energy_density(temp, tau_opt, CCTK_REAL(1.0));
+  rad_energy_density(const CCTK_REAL temp, const optical_depths &od) const {
+    return rad_energy_density(temp, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -73,17 +81,17 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   press_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                              const CCTK_REAL ye,
-                             const CCTK_REAL tau_opt,
+                             const optical_depths &od,
                              const CCTK_REAL rad_ramp) const {
     return press_from_rho_temp_ye_pref(rho, temp, ye,
-                                       rad_prefactor(tau_opt, rad_ramp));
+                                       rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   press_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                              const CCTK_REAL ye,
-                             const CCTK_REAL tau_opt) const {
-    return press_from_rho_temp_ye_tau(rho, temp, ye, tau_opt, CCTK_REAL(1.0));
+                             const optical_depths &od) const {
+    return press_from_rho_temp_ye_tau(rho, temp, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -96,17 +104,17 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   eps_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                            const CCTK_REAL ye,
-                           const CCTK_REAL tau_opt,
+                           const optical_depths &od,
                            const CCTK_REAL rad_ramp) const {
     return eps_from_rho_temp_ye_pref(rho, temp, ye,
-                                     rad_prefactor(tau_opt, rad_ramp));
+                                     rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   eps_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                            const CCTK_REAL ye,
-                           const CCTK_REAL tau_opt) const {
-    return eps_from_rho_temp_ye_tau(rho, temp, ye, tau_opt, CCTK_REAL(1.0));
+                           const optical_depths &od) const {
+    return eps_from_rho_temp_ye_tau(rho, temp, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -121,27 +129,27 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   enthalpy_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                                 const CCTK_REAL ye,
-                                const CCTK_REAL tau_opt,
+                                const optical_depths &od,
                                 const CCTK_REAL rad_ramp) const {
     return enthalpy_from_rho_temp_ye_pref(rho, temp, ye,
-                                          rad_prefactor(tau_opt, rad_ramp));
+                                          rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   enthalpy_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                                 const CCTK_REAL ye,
-                                const CCTK_REAL tau_opt) const {
-    return enthalpy_from_rho_temp_ye_tau(rho, temp, ye, tau_opt,
+                                const optical_depths &od) const {
+    return enthalpy_from_rho_temp_ye_tau(rho, temp, ye, od,
                                          CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   csnd_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt,
+                            const optical_depths &od,
                             const CCTK_REAL rad_ramp) const {
     const CCTK_REAL temp_pos = fmax(temp, CCTK_REAL(1.0e-300));
-    const CCTK_REAL pref = rad_prefactor(tau_opt, rad_ramp);
+    const CCTK_REAL pref = rad_prefactor(od, rad_ramp);
     const CCTK_REAL t2 = temp_pos * temp_pos;
     const CCTK_REAL t3 = t2 * temp_pos;
     const CCTK_REAL h =
@@ -159,17 +167,17 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   csnd_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt) const {
-    return csnd_from_rho_temp_ye_tau(rho, temp, ye, tau_opt, CCTK_REAL(1.0));
+                            const optical_depths &od) const {
+    return csnd_from_rho_temp_ye_tau(rho, temp, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   entropy_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                                const CCTK_REAL ye,
-                               const CCTK_REAL tau_opt,
+                               const optical_depths &od,
                                const CCTK_REAL rad_ramp) const {
     const CCTK_REAL eps_gas = temp / gm1;
-    const CCTK_REAL pref = rad_prefactor(tau_opt, rad_ramp);
+    const CCTK_REAL pref = rad_prefactor(od, rad_ramp);
     return log(eps_gas * pow(rho, -gm1)) +
            gm1 * CCTK_REAL(4.0) * pref * temp * temp * temp /
                (CCTK_REAL(3.0) * rho);
@@ -178,25 +186,25 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   entropy_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                                const CCTK_REAL ye,
-                               const CCTK_REAL tau_opt) const {
-    return entropy_from_rho_temp_ye_tau(rho, temp, ye, tau_opt,
+                               const optical_depths &od) const {
+    return entropy_from_rho_temp_ye_tau(rho, temp, ye, od,
                                         CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   temp_from_rho_eps_ye_tau(const CCTK_REAL rho, CCTK_REAL &eps,
                            const CCTK_REAL ye,
-                           const CCTK_REAL tau_opt,
+                           const optical_depths &od,
                            const CCTK_REAL rad_ramp) const {
     return temp_from_rho_eps_ye_pref(rho, eps, ye,
-                                     rad_prefactor(tau_opt, rad_ramp));
+                                     rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   temp_from_rho_eps_ye_tau(const CCTK_REAL rho, CCTK_REAL &eps,
                            const CCTK_REAL ye,
-                           const CCTK_REAL tau_opt) const {
-    return temp_from_rho_eps_ye_tau(rho, eps, ye, tau_opt, CCTK_REAL(1.0));
+                           const optical_depths &od) const {
+    return temp_from_rho_eps_ye_tau(rho, eps, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -225,17 +233,17 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   temp_from_rho_press_ye_tau(const CCTK_REAL rho, CCTK_REAL &press,
                              const CCTK_REAL ye,
-                             const CCTK_REAL tau_opt,
+                             const optical_depths &od,
                              const CCTK_REAL rad_ramp) const {
     return temp_from_rho_press_ye_pref(rho, press, ye,
-                                       rad_prefactor(tau_opt, rad_ramp));
+                                       rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   temp_from_rho_press_ye_tau(const CCTK_REAL rho, CCTK_REAL &press,
                              const CCTK_REAL ye,
-                             const CCTK_REAL tau_opt) const {
-    return temp_from_rho_press_ye_tau(rho, press, ye, tau_opt, CCTK_REAL(1.0));
+                             const optical_depths &od) const {
+    return temp_from_rho_press_ye_tau(rho, press, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -273,17 +281,17 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   eps_from_rho_press_ye_tau(const CCTK_REAL rho, const CCTK_REAL press,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt,
+                            const optical_depths &od,
                             const CCTK_REAL rad_ramp) const {
     return eps_from_rho_press_ye_pref(rho, press, ye,
-                                      rad_prefactor(tau_opt, rad_ramp));
+                                      rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   eps_from_rho_press_ye_tau(const CCTK_REAL rho, const CCTK_REAL press,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt) const {
-    return eps_from_rho_press_ye_tau(rho, press, ye, tau_opt, CCTK_REAL(1.0));
+                            const optical_depths &od) const {
+    return eps_from_rho_press_ye_tau(rho, press, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -297,17 +305,17 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   press_from_rho_eps_ye_tau(const CCTK_REAL rho, CCTK_REAL &eps,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt,
+                            const optical_depths &od,
                             const CCTK_REAL rad_ramp) const {
     return press_from_rho_eps_ye_pref(rho, eps, ye,
-                                      rad_prefactor(tau_opt, rad_ramp));
+                                      rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   press_from_rho_eps_ye_tau(const CCTK_REAL rho, CCTK_REAL &eps,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt) const {
-    return press_from_rho_eps_ye_tau(rho, eps, ye, tau_opt, CCTK_REAL(1.0));
+                            const optical_depths &od) const {
+    return press_from_rho_eps_ye_tau(rho, eps, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -315,35 +323,36 @@ public:
                              const CCTK_REAL ye,
                              const CCTK_REAL pref) const {
     const CCTK_REAL temp = temp_from_rho_eps_ye_pref(rho, eps, ye, pref);
-    return kappa_from_rho_temp_ye_tau(rho, temp, ye, CCTK_REAL(0.0));
+    return kappa_from_rho_temp_ye_tau(rho, temp, ye,
+                                      optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   kappa_from_rho_eps_ye_tau(const CCTK_REAL rho, CCTK_REAL &eps,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt,
+                            const optical_depths &od,
                             const CCTK_REAL rad_ramp) const {
     return kappa_from_rho_eps_ye_pref(rho, eps, ye,
-                                      rad_prefactor(tau_opt, rad_ramp));
+                                      rad_prefactor(od, rad_ramp));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   kappa_from_rho_eps_ye_tau(const CCTK_REAL rho, CCTK_REAL &eps,
                             const CCTK_REAL ye,
-                            const CCTK_REAL tau_opt) const {
-    return kappa_from_rho_eps_ye_tau(rho, eps, ye, tau_opt, CCTK_REAL(1.0));
+                            const optical_depths &od) const {
+    return kappa_from_rho_eps_ye_tau(rho, eps, ye, od, CCTK_REAL(1.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   press_from_rho_eps_ye(const CCTK_REAL rho, CCTK_REAL &eps,
                         const CCTK_REAL ye) const {
-    return press_from_rho_eps_ye_tau(rho, eps, ye, CCTK_REAL(0.0));
+    return press_from_rho_eps_ye_tau(rho, eps, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   eps_from_rho_press_ye(const CCTK_REAL rho, const CCTK_REAL press,
                         const CCTK_REAL ye) const {
-    return eps_from_rho_press_ye_tau(rho, press, ye, CCTK_REAL(0.0));
+    return eps_from_rho_press_ye_tau(rho, press, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -356,37 +365,37 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   csnd_from_rho_temp_ye(const CCTK_REAL rho, const CCTK_REAL temp,
                         const CCTK_REAL ye) const {
-    return csnd_from_rho_temp_ye_tau(rho, temp, ye, CCTK_REAL(0.0));
+    return csnd_from_rho_temp_ye_tau(rho, temp, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   temp_from_rho_eps_ye(const CCTK_REAL rho, CCTK_REAL &eps,
                        const CCTK_REAL ye) const {
-    return temp_from_rho_eps_ye_tau(rho, eps, ye, CCTK_REAL(0.0));
+    return temp_from_rho_eps_ye_tau(rho, eps, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   temp_from_rho_press_ye(const CCTK_REAL rho, CCTK_REAL &press,
                          const CCTK_REAL ye) const {
-    return temp_from_rho_press_ye_tau(rho, press, ye, CCTK_REAL(0.0));
+    return temp_from_rho_press_ye_tau(rho, press, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   eps_from_rho_temp_ye(const CCTK_REAL rho, const CCTK_REAL temp,
                        const CCTK_REAL ye) const {
-    return eps_from_rho_temp_ye_tau(rho, temp, ye, CCTK_REAL(0.0));
+    return eps_from_rho_temp_ye_tau(rho, temp, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   press_from_rho_temp_ye(const CCTK_REAL rho, const CCTK_REAL temp,
                          const CCTK_REAL ye) const {
-    return press_from_rho_temp_ye_tau(rho, temp, ye, CCTK_REAL(0.0));
+    return press_from_rho_temp_ye_tau(rho, temp, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   entropy_from_rho_temp_ye(const CCTK_REAL rho, const CCTK_REAL temp,
                            const CCTK_REAL ye) const {
-    return entropy_from_rho_temp_ye_tau(rho, temp, ye, CCTK_REAL(0.0));
+    return entropy_from_rho_temp_ye_tau(rho, temp, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -394,8 +403,8 @@ public:
                           const CCTK_REAL ye) const {
     CCTK_REAL eps_tmp = eps;
     const CCTK_REAL temp =
-        temp_from_rho_eps_ye_tau(rho, eps_tmp, ye, CCTK_REAL(0.0));
-    return entropy_from_rho_temp_ye_tau(rho, temp, ye, CCTK_REAL(0.0));
+        temp_from_rho_eps_ye_tau(rho, eps_tmp, ye, optical_depths{0.0, 0.0, 0.0});
+    return entropy_from_rho_temp_ye_tau(rho, temp, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -413,14 +422,14 @@ public:
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   kappa_from_rho_temp_ye_tau(const CCTK_REAL rho, const CCTK_REAL temp,
                              const CCTK_REAL ye,
-                             const CCTK_REAL tau_opt) const {
+                             const optical_depths &od) const {
     return temp * pow(rho, CCTK_REAL(1.0) - gamma);
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   kappa_from_rho_eps_ye(const CCTK_REAL rho, CCTK_REAL &eps,
                         const CCTK_REAL ye) const {
-    return kappa_from_rho_eps_ye_tau(rho, eps, ye, CCTK_REAL(0.0));
+    return kappa_from_rho_eps_ye_tau(rho, eps, ye, optical_depths{0.0, 0.0, 0.0});
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline range
