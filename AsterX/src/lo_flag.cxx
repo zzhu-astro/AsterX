@@ -97,8 +97,8 @@ void CalcLOFlag(CCTK_ARGUMENTS, EOSType *eos_3p) {
         // Calculate c_sound
         const EOSX::optical_depths od_local = local_optd<EOSType>(od_gfs, p.I);
 	        const CCTK_REAL cs = eos_csnd_from_rho_temp(
-	            eos_3p, rho(p.I), temperature(p.I), Ye(p.I), od_local,
-	            rad_ramp);
+	            eos_3p, rho(p.I), temperature(p.I), Ye(p.I),
+	            eos_rad_prefactor(eos_3p, od_local, rad_ramp));
 
         // Check velocity
         for (int dir = 0; dir < 3; dir++) {

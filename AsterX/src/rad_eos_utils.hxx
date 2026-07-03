@@ -128,14 +128,27 @@ local_optd(const leakage_optd_gfs &od,
   }
 }
 
+// Convert (local optical depths, time ramp) into the scalar radiation
+// prefactor. This is the ONLY place optical depths feed the EOS; all
+// thermodynamic dispatch helpers below take the finished rad_pref scalar.
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST inline CCTK_REAL
+eos_rad_prefactor(const EOSType *eos, const EOSX::optical_depths &od,
+                  const CCTK_REAL rad_ramp) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos->rad_prefactor(od, rad_ramp);
+  } else {
+    return CCTK_REAL(0.0);
+  }
+}
+
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_press_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
                         const CCTK_REAL temp, const CCTK_REAL ye,
-                        const EOSX::optical_depths &od,
-                        const CCTK_REAL rad_ramp) {
+                        const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->press_from_rho_temp_ye_tau(rho, temp, ye, od, rad_ramp);
+    return eos->press_from_rho_temp_ye_pref(rho, temp, ye, rad_pref);
   } else {
     return eos->press_from_rho_temp_ye(rho, temp, ye);
   }
@@ -145,10 +158,9 @@ template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_eps_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
                       const CCTK_REAL temp, const CCTK_REAL ye,
-                      const EOSX::optical_depths &od,
-                      const CCTK_REAL rad_ramp) {
+                      const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->eps_from_rho_temp_ye_tau(rho, temp, ye, od, rad_ramp);
+    return eos->eps_from_rho_temp_ye_pref(rho, temp, ye, rad_pref);
   } else {
     return eos->eps_from_rho_temp_ye(rho, temp, ye);
   }
@@ -158,10 +170,9 @@ template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_eps_from_rho_press(const EOSType *eos, const CCTK_REAL rho,
                        const CCTK_REAL press, const CCTK_REAL ye,
-                       const EOSX::optical_depths &od,
-                       const CCTK_REAL rad_ramp) {
+                       const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->eps_from_rho_press_ye_tau(rho, press, ye, od, rad_ramp);
+    return eos->eps_from_rho_press_ye_pref(rho, press, ye, rad_pref);
   } else {
     return eos->eps_from_rho_press_ye(rho, press, ye);
   }
@@ -170,10 +181,9 @@ eos_eps_from_rho_press(const EOSType *eos, const CCTK_REAL rho,
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_temp_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
-                      const CCTK_REAL ye, const EOSX::optical_depths &od,
-                      const CCTK_REAL rad_ramp) {
+                      const CCTK_REAL ye, const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->temp_from_rho_eps_ye_tau(rho, eps, ye, od, rad_ramp);
+    return eos->temp_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
   } else {
     return eos->temp_from_rho_eps_ye(rho, eps, ye);
   }
@@ -182,10 +192,9 @@ eos_temp_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_press_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
-                       const CCTK_REAL ye, const EOSX::optical_depths &od,
-                       const CCTK_REAL rad_ramp) {
+                       const CCTK_REAL ye, const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->press_from_rho_eps_ye_tau(rho, eps, ye, od, rad_ramp);
+    return eos->press_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
   } else {
     return eos->press_from_rho_eps_ye(rho, eps, ye);
   }
@@ -194,10 +203,9 @@ eos_press_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_kappa_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
-                       const CCTK_REAL ye, const EOSX::optical_depths &od,
-                       const CCTK_REAL rad_ramp) {
+                       const CCTK_REAL ye, const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->kappa_from_rho_eps_ye_tau(rho, eps, ye, od, rad_ramp);
+    return eos->kappa_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
   } else {
     return eos->kappa_from_rho_eps_ye(rho, eps, ye);
   }
@@ -207,10 +215,9 @@ template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
 eos_csnd_from_rho_temp(const EOSType *eos, const CCTK_REAL rho,
                        const CCTK_REAL temp, const CCTK_REAL ye,
-                       const EOSX::optical_depths &od,
-                       const CCTK_REAL rad_ramp) {
+                       const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->csnd_from_rho_temp_ye_tau(rho, temp, ye, od, rad_ramp);
+    return eos->csnd_from_rho_temp_ye_pref(rho, temp, ye, rad_pref);
   } else {
     return eos->csnd_from_rho_temp_ye(rho, temp, ye);
   }

@@ -45,11 +45,10 @@ apply_bh_interior_for_eos(const c2p_2DNoble &c2p_Noble,
                           const c2p_Noble_rad &c2p_Rad,
 	                          const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
 	                          const smat<CCTK_REAL, 3> &glo,
-	                          const EOSX::optical_depths &od_local,
-	                          const CCTK_REAL rad_ramp) {
+	                          const CCTK_REAL rad_pref) {
 	  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-	    c2p_Rad.bh_interior_tau<EOSType, limiting>(eos_3p, pv, cv, glo,
-	                                               od_local, rad_ramp);
+	    c2p_Rad.bh_interior_rad<EOSType, limiting>(eos_3p, pv, cv, glo,
+	                                               rad_pref);
 	  } else {
 	    c2p_Noble.bh_interior<EOSType, limiting>(eos_3p, pv, cv, glo);
 	  }
@@ -61,11 +60,9 @@ solve_noble_rad_for_eos(const c2p_Noble_rad &c2p_Rad, const EOSType *eos_3p,
 	                        prim_vars &pv, prim_vars &pv_seeds, cons_vars &cv,
 	                        const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
 	                        const smat<CCTK_REAL, 3> &glo,
-	                        const EOSX::optical_depths &od_local,
-	                        const CCTK_REAL rad_ramp, c2p_report &rep) {
+	                        const CCTK_REAL rad_pref, c2p_report &rep) {
 	  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-	    c2p_Rad.solve(eos_3p, pv, pv_seeds, cv, alp, beta, glo, od_local,
-	                  rad_ramp, rep);
+	    c2p_Rad.solve(eos_3p, pv, pv_seeds, cv, alp, beta, glo, rad_pref, rep);
 	  } else {
 	    assert(0);
 	  }
@@ -121,42 +118,46 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
   const auto c2p_impl = [=] CCTK_DEVICE(
                             const PointDesc &p) CCTK_ATTRIBUTE_ALWAYS_INLINE {
+    // Radiation prefactor: the only quantity derived from the local optical
+    // depths; all EOS calls below depend on radiation solely through it.
     const EOSX::optical_depths od_local = local_optd<EOSType>(od_gfs, p.I);
+    const CCTK_REAL rad_pref_local =
+        eos_rad_prefactor(eos_3p, od_local, rad_ramp);
     const auto press_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
             const CCTK_REAL ye_) ARITH_INLINE {
 	          return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_,
-	                                         od_local, rad_ramp);
+	                                         rad_pref_local);
         };
     const auto eps_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
             const CCTK_REAL ye_) ARITH_INLINE {
-	          return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_, od_local,
-	                                       rad_ramp);
+	          return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_,
+	                                       rad_pref_local);
         };
     const auto eps_from_rho_press =
         [&](const CCTK_REAL rho_, const CCTK_REAL press_,
             const CCTK_REAL ye_) ARITH_INLINE {
 	          return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_,
-	                                        od_local, rad_ramp);
+	                                        rad_pref_local);
         };
     const auto temp_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
             const CCTK_REAL ye_) ARITH_INLINE {
-	          return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_, od_local,
-	                                       rad_ramp);
+	          return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                       rad_pref_local);
         };
     const auto press_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
             const CCTK_REAL ye_) ARITH_INLINE {
-	          return eos_press_from_rho_eps(eos_3p, rho_, eps_, ye_, od_local,
-	                                        rad_ramp);
+	          return eos_press_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                        rad_pref_local);
         };
     const auto entropy_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
             const CCTK_REAL ye_) ARITH_INLINE {
-	          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_, od_local,
-	                                        rad_ramp);
+	          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                        rad_pref_local);
         };
     // Note that HydroBaseX gfs are NaN when entering this loop due
     // explicit dependence on conservatives from
@@ -351,8 +352,7 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
 
       if (mask_local != 1.0) {
 	        apply_bh_interior_for_eos<EOSType, false>(
-	            c2p_Noble, c2p_Rad, eos_3p, pv_seeds, cv, glo, od_local,
-	            rad_ramp);
+	            c2p_Noble, c2p_Rad, eos_3p, pv_seeds, cv, glo, rad_pref_local);
         pv = pv_seeds;
         call_c2p = false;
       }
@@ -380,8 +380,7 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
       }
       case c2p_first_t::NobleRad: {
 	        solve_noble_rad_for_eos(c2p_Rad, eos_3p, pv, pv_seeds, cv, alp_avg,
-	                                beta_avg, glo, od_local, rad_ramp,
-	                                rep_first);
+	                                beta_avg, glo, rad_pref_local, rep_first);
         break;
       }
       case c2p_first_t::RePrimAnd: {
@@ -389,7 +388,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
         break;
       }
       case c2p_first_t::Palenzuela: {
-        c2p_Pal.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo, rep_first);
+        c2p_Pal.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo, rad_pref_local,
+                      rep_first);
         break;
       }
       case c2p_first_t::Entropy: {
@@ -422,8 +422,7 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
         }
         case c2p_second_t::NobleRad: {
 	          solve_noble_rad_for_eos(c2p_Rad, eos_3p, pv, pv_seeds, cv, alp_avg,
-	                                  beta_avg, glo, od_local, rad_ramp,
-	                                  rep_second);
+	                                  beta_avg, glo, rad_pref_local, rep_second);
           break;
         }
         case c2p_second_t::RePrimAnd: {
@@ -431,7 +430,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
           break;
         }
         case c2p_second_t::Palenzuela: {
-          c2p_Pal.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo, rep_second);
+          c2p_Pal.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo,
+                        rad_pref_local, rep_second);
           break;
         }
         case c2p_second_t::Entropy: {
@@ -492,8 +492,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
             if (mask_local != 1.0) {
               // Failure inside mask
 	              apply_bh_interior_for_eos<EOSType, false>(
-	                  c2p_Noble, c2p_Rad, eos_3p, pv_seeds, cv, glo, od_local,
-	                  rad_ramp);
+	                  c2p_Noble, c2p_Rad, eos_3p, pv_seeds, cv, glo,
+	                  rad_pref_local);
               pv = pv_seeds;
             } else {
               // Failure outside, set to atmo
@@ -541,8 +541,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
           if (mask_local != 1.0) {
             // Failure inside mask
 	            apply_bh_interior_for_eos<EOSType, false>(
-	                c2p_Noble, c2p_Rad, eos_3p, pv_seeds, cv, glo, od_local,
-	                rad_ramp);
+	                c2p_Noble, c2p_Rad, eos_3p, pv_seeds, cv, glo,
+	                rad_pref_local);
             pv = pv_seeds;
           } else {
             // Failure outside, set to atmo
@@ -558,8 +558,7 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
       // Inside mask, C2P success
       if ((mask_local != 1.0) && c2p_flag_local) {
 	        apply_bh_interior_for_eos<EOSType, true>(
-	            c2p_Noble, c2p_Rad, eos_3p, pv, cv, glo, od_local,
-	            rad_ramp);
+	            c2p_Noble, c2p_Rad, eos_3p, pv, cv, glo, rad_pref_local);
       }
     }
 
@@ -635,17 +634,21 @@ extern "C" void AsterX_Con2Prim(CCTK_ARGUMENTS) {
   }
   if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
       !(CCTK_EQUALS(c2p_prime, "Noble_rad") ||
-        CCTK_EQUALS(c2p_second, "Noble_rad"))) {
+        CCTK_EQUALS(c2p_prime, "Palenzuela") ||
+        CCTK_EQUALS(c2p_second, "Noble_rad") ||
+        CCTK_EQUALS(c2p_second, "Palenzuela"))) {
     CCTK_ERROR("Rad_idealgas requires Con2PrimFactory::c2p_prime or "
-               "c2p_second to be \"Noble_rad\".");
+               "c2p_second to be \"Noble_rad\" or \"Palenzuela\".");
   }
   if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
       ((!CCTK_EQUALS(c2p_prime, "Noble_rad") &&
+        !CCTK_EQUALS(c2p_prime, "Palenzuela") &&
         !CCTK_EQUALS(c2p_prime, "None")) ||
        (!CCTK_EQUALS(c2p_second, "Noble_rad") &&
+        !CCTK_EQUALS(c2p_second, "Palenzuela") &&
         !CCTK_EQUALS(c2p_second, "None")))) {
-    CCTK_ERROR("Rad_idealgas only supports Con2PrimFactory::Noble_rad (or "
-               "\"None\") for c2p_prime/c2p_second.");
+    CCTK_ERROR("Rad_idealgas only supports Con2PrimFactory::Noble_rad, "
+               "Palenzuela (or \"None\") for c2p_prime/c2p_second.");
   }
   if (!CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
       (CCTK_EQUALS(c2p_prime, "Noble_rad") ||

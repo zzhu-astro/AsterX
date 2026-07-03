@@ -9,7 +9,7 @@ KEYWORD c2p_prime "Name of the main con2prim scheme" STEERABLE=ALWAYS {
   "RePrimAnd" :: "RePrimAnd"
   "Noble" ::"Noble"
   "Noble_rad" ::"Noble radiation-pressure ideal-gas solver"
-  "Palenzuela" ::"Palenzuela"
+  "Palenzuela" ::"Palenzuela (also supports the Rad_idealgas radiation-pressure EOS)"
   "Entropy" ::"Entropy"
   "None" :: "None"
 }
@@ -19,7 +19,7 @@ KEYWORD c2p_second "Name of the backup con2prim scheme" STEERABLE=ALWAYS {
   "RePrimAnd" :: "RePrimAnd"
   "Noble" ::"Noble"
   "Noble_rad" ::"Noble radiation-pressure ideal-gas solver"
-  "Palenzuela" ::"Palenzuela"
+  "Palenzuela" ::"Palenzuela (also supports the Rad_idealgas radiation-pressure EOS)"
   "Entropy" ::"Entropy"
   "None" :: "None"
 }

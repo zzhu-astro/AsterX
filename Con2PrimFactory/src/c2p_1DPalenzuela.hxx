@@ -1,10 +1,53 @@
 #ifndef C2P_1DPALENZUELA_HXX
 #define C2P_1DPALENZUELA_HXX
 
+#include <type_traits>
+
 #include "c2p.hxx"
 #include "roots.hxx"
 
 namespace Con2PrimFactory {
+
+// Small typed EOS-dispatch helpers for the Palenzuela scheme.
+// Radiation enters the EOS only through the scalar prefactor rad_pref:
+// for the radiation EOS the explicit _pref methods are called; for any
+// other EOS these collapse at compile time to the original _ye calls and
+// rad_pref is unused, preserving exact legacy behavior.
+template <typename EOSType>
+CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
+pal_press_from_rho_eps_ye(const EOSType *eos_3p, const CCTK_REAL rho,
+                          CCTK_REAL &eps, const CCTK_REAL ye,
+                          const CCTK_REAL rad_pref) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos_3p->press_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
+  } else {
+    return eos_3p->press_from_rho_eps_ye(rho, eps, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
+pal_temp_from_rho_eps_ye(const EOSType *eos_3p, const CCTK_REAL rho,
+                         CCTK_REAL &eps, const CCTK_REAL ye,
+                         const CCTK_REAL rad_pref) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos_3p->temp_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
+  } else {
+    return eos_3p->temp_from_rho_eps_ye(rho, eps, ye);
+  }
+}
+
+template <typename EOSType>
+CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
+pal_kappa_from_rho_eps_ye(const EOSType *eos_3p, const CCTK_REAL rho,
+                          CCTK_REAL &eps, const CCTK_REAL ye,
+                          const CCTK_REAL rad_pref) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos_3p->kappa_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
+  } else {
+    return eos_3p->kappa_from_rho_eps_ye(rho, eps, ye);
+  }
+}
 
 class c2p_1DPalenzuela : public c2p {
 public:
@@ -42,14 +85,25 @@ public:
   xPalenzuelaToPrim(CCTK_REAL xPalenzuela_Sol, CCTK_REAL Ssq, CCTK_REAL Bsq,
                     CCTK_REAL BiSi, const EOSType *eos_3p, prim_vars &pv,
                     const cons_vars &cv, const smat<CCTK_REAL, 3> &gup,
-                    const smat<CCTK_REAL, 3> &glo) const;
+                    const smat<CCTK_REAL, 3> &glo,
+                    const CCTK_REAL rad_pref) const;
 
   template <typename EOSType>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   funcRoot_1DPalenzuela(CCTK_REAL Ssq, CCTK_REAL Bsq, CCTK_REAL BiSi,
                         CCTK_REAL x, const EOSType *eos_3p,
-                        const cons_vars &cv) const;
+                        const cons_vars &cv, const CCTK_REAL rad_pref) const;
 
+  // Radiation-aware entry point: rad_pref is the per-cell radiation
+  // prefactor (0 or ignored for non-radiation EOS).
+  template <typename EOSType>
+  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+  solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
+        const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
+        const smat<CCTK_REAL, 3> &glo, const CCTK_REAL rad_pref,
+        c2p_report &rep) const;
+
+  // Legacy entry point, unchanged: delegates with rad_pref = 0.
   template <typename EOSType>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
   solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
@@ -153,7 +207,8 @@ c2p_1DPalenzuela::xPalenzuelaToPrim(CCTK_REAL xPalenzuela_Sol, CCTK_REAL Ssq,
                                     const EOSType *eos_3p, prim_vars &pv,
                                     const cons_vars &cv,
                                     const smat<CCTK_REAL, 3> &gup,
-                                    const smat<CCTK_REAL, 3> &glo) const {
+                                    const smat<CCTK_REAL, 3> &glo,
+                                    const CCTK_REAL rad_pref) const {
   const CCTK_REAL qPalenzuela = cv.tau / cv.dens;
   const CCTK_REAL rPalenzuela = Ssq / pow(cv.dens, 2);
   const CCTK_REAL sPalenzuela = Bsq / cv.dens;
@@ -252,11 +307,14 @@ c2p_1DPalenzuela::xPalenzuelaToPrim(CCTK_REAL xPalenzuela_Sol, CCTK_REAL Ssq,
 
   pv.Ye = cv.DYe / cv.dens;
 
-  pv.press = eos_3p->press_from_rho_eps_ye(pv.rho, pv.eps, pv.Ye);
+  pv.press = pal_press_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                       rad_pref);
 
-  pv.temperature = eos_3p->temp_from_rho_eps_ye(pv.rho, pv.eps, pv.Ye);
+  pv.temperature = pal_temp_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                            rad_pref);
 
-  pv.entropy = eos_3p->kappa_from_rho_eps_ye(pv.rho, pv.eps, pv.Ye);
+  pv.entropy = pal_kappa_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                         rad_pref);
 
   pv.Bvec = cv.dBvec;
 
@@ -269,7 +327,8 @@ CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
 c2p_1DPalenzuela::funcRoot_1DPalenzuela(CCTK_REAL Ssq, CCTK_REAL Bsq,
                                         CCTK_REAL BiSi, CCTK_REAL x,
                                         const EOSType *eos_3p,
-                                        const cons_vars &cv) const {
+                                        const cons_vars &cv,
+                                        const CCTK_REAL rad_pref) const {
   // computes f(x) from x and q,r,s,t
   const CCTK_REAL qPalenzuela = cv.tau / cv.dens;
   const CCTK_REAL rPalenzuela = Ssq / pow(cv.dens, 2);
@@ -304,7 +363,8 @@ c2p_1DPalenzuela::funcRoot_1DPalenzuela(CCTK_REAL Ssq, CCTK_REAL Bsq,
   }
 
   // (iv)
-  CCTK_REAL P_loc = eos_3p->press_from_rho_eps_ye(rho_loc, eps_loc, Ye_loc);
+  CCTK_REAL P_loc =
+      pal_press_from_rho_eps_ye(eos_3p, rho_loc, eps_loc, Ye_loc, rad_pref);
 
   return (x - (1.0 + eps_loc + P_loc / rho_loc) * W_loc);
 }
@@ -313,7 +373,8 @@ template <typename EOSType>
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
 c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
                         const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
-                        const smat<CCTK_REAL, 3> &glo, c2p_report &rep) const {
+                        const smat<CCTK_REAL, 3> &glo,
+                        const CCTK_REAL rad_pref, c2p_report &rep) const {
 
   ROOTSTAT status = ROOTSTAT::SUCCESS;
   rep.iters = 0;
@@ -418,7 +479,7 @@ c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
   CCTK_REAL a = xPalenzuela_lowerBound;
   CCTK_REAL b = xPalenzuela_upperBound;
   auto fn = [&](auto x) {
-    return funcRoot_1DPalenzuela(Ssq, Bsq, BiSi, x, eos_3p, cv);
+    return funcRoot_1DPalenzuela(Ssq, Bsq, BiSi, x, eos_3p, cv, rad_pref);
   };
 
   // Dominant energy check
@@ -457,7 +518,8 @@ c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
 
   CCTK_REAL xPalenzuela_Sol = CCTK_REAL(0.5) * (result.first + result.second);
 
-  xPalenzuelaToPrim(xPalenzuela_Sol, Ssq, Bsq, BiSi, eos_3p, pv, cv, gup, glo);
+  xPalenzuelaToPrim(xPalenzuela_Sol, Ssq, Bsq, BiSi, eos_3p, pv, cv, gup, glo,
+                    rad_pref);
 
   // Error out if rho is negative or zero
   if (pv.rho <= 0.0) {
@@ -532,9 +594,12 @@ c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
     pv.w_lor = w_lim;
     const auto rgeps_lim = eos_3p->range_eps_from_rho_ye(pv.rho, pv.Ye);
     pv.eps = fmin(fmax(rgeps_lim.min, pv.eps), rgeps_lim.max);
-    pv.press = eos_3p->press_from_rho_eps_ye(pv.rho, pv.eps, pv.Ye);
-    pv.temperature = eos_3p->temp_from_rho_eps_ye(pv.rho, pv.eps, pv.Ye);
-    pv.entropy = eos_3p->kappa_from_rho_eps_ye(pv.rho, pv.eps, pv.Ye);
+    pv.press = pal_press_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                         rad_pref);
+    pv.temperature = pal_temp_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                              rad_pref);
+    pv.entropy = pal_kappa_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                           rad_pref);
     rep.adjust_cons = true;
   }
 
@@ -545,7 +610,12 @@ c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
     return;
   }
 
-  c2p::prims_floors_and_ceilings(eos_3p, pv, cv, alp, beta, glo, rep);
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    c2p::prims_floors_and_ceilings_rad(eos_3p, pv, cv, alp, beta, glo,
+                                       rad_pref, rep);
+  } else {
+    c2p::prims_floors_and_ceilings(eos_3p, pv, cv, alp, beta, glo, rep);
+  }
 
   // Recompute cons if prims have been adjusted
   if (rep.adjust_cons) {
@@ -556,6 +626,15 @@ c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
     // Conserved entropy must be consistent with new prims
     cv.DEnt = cv.dens * pv.entropy;
   }
+}
+
+/* Legacy entry point: identical behavior, radiation prefactor zero */
+template <typename EOSType>
+CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
+                        const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
+                        const smat<CCTK_REAL, 3> &glo, c2p_report &rep) const {
+  solve(eos_3p, pv, cv, alp, beta, glo, CCTK_REAL(0.0), rep);
 }
 
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void

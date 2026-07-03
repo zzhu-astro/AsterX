@@ -21,29 +21,23 @@ public:
                     use_pressure_atmo, soft_root_conv,
                     soft_root_width_factor_in) {}
 
+  // The radiation physics enters solely through the per-cell scalar
+  // prefactor rad_pref (built by the caller via rad_prefactor(od, ramp)).
   template <typename EOSType>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
   solve(const EOSType *eos_3p, prim_vars &pv, prim_vars &pv_seeds,
         cons_vars &cv, const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
-        const smat<CCTK_REAL, 3> &glo, const EOSX::optical_depths &od,
-        const CCTK_REAL rad_ramp, c2p_report &rep) const;
+        const smat<CCTK_REAL, 3> &glo, const CCTK_REAL rad_pref,
+        c2p_report &rep) const;
 
   template <typename EOSType, bool limiting>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
-  bh_interior_tau(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
+  bh_interior_rad(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
                   const smat<CCTK_REAL, 3> &glo,
-                  const EOSX::optical_depths &od, const CCTK_REAL rad_ramp) const;
+                  const CCTK_REAL rad_pref) const;
 
 private:
-  template <typename EOSType>
-  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
-  prims_floors_and_ceilings_tau(const EOSType *eos_3p, prim_vars &pv,
-                                const cons_vars &cv, const CCTK_REAL alp,
-                                const vec<CCTK_REAL, 3> &beta,
-                                const smat<CCTK_REAL, 3> &glo,
-                                const EOSX::optical_depths &od,
-                                const CCTK_REAL rad_pref,
-                                c2p_report &rep) const;
+  // prims_floors_and_ceilings_rad is inherited from the c2p base class.
 
   template <typename EOSType>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
@@ -222,8 +216,7 @@ private:
     pv.press = eos_3p->press_from_rho_temp_ye_pref(pv.rho, pv.temperature,
                                                    pv.Ye, rad_pref);
     pv.entropy =
-        eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                           EOSX::optical_depths{0.0, 0.0, 0.0});
+        eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
     pv.Bvec = cv.dBvec;
 
     const vec<CCTK_REAL, 3> Elow = calc_cross_product(pv.Bvec, pv.vel);
@@ -231,220 +224,12 @@ private:
   }
 };
 
-template <typename EOSType>
-CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
-c2p_Noble_rad::prims_floors_and_ceilings_tau(
-    const EOSType *eos_3p, prim_vars &pv, const cons_vars &cv,
-    const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
-    const smat<CCTK_REAL, 3> &glo, const EOSX::optical_depths &od,
-    const CCTK_REAL rad_pref, c2p_report &rep) const {
-
-  bool recomp_eps_press_entropy = false;
-
-  const CCTK_REAL rho_h_fluid_old = pv.rho + pv.rho * pv.eps + pv.press;
-
-  if (pv.Ye < eos_3p->rgye.min) {
-    pv.Ye = eos_3p->rgye.min;
-    rep.adjust_cons = true;
-    recomp_eps_press_entropy = true;
-  }
-
-  if (pv.Ye > eos_3p->rgye.max) {
-    pv.Ye = eos_3p->rgye.max;
-    rep.adjust_cons = true;
-    recomp_eps_press_entropy = true;
-  }
-
-  vec<CCTK_REAL, 3> v_low = calc_contraction(glo, pv.vel);
-  CCTK_REAL vsq_Sol = calc_contraction(v_low, pv.vel);
-  CCTK_REAL sol_v = sqrt(vsq_Sol);
-
-  if (sol_v > v_lim) {
-    pv.rho = cv.dens / w_lim;
-    pv.vel *= v_lim / sol_v;
-    pv.w_lor = w_lim;
-    rep.adjust_cons = true;
-
-    if (use_temp) {
-      recomp_eps_press_entropy = true;
-    } else {
-      recomp_eps_press_entropy = false;
-      pv.eps =
-          eos_3p->eps_from_rho_press_ye_pref(pv.rho, pv.press, pv.Ye,
-                                              rad_pref);
-      pv.temperature =
-          eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
-      pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                             od);
-    }
-  }
-
-  if (pv.rho > eos_3p->rgrho.max) {
-    pv.rho = eos_3p->rgrho.max;
-    rep.adjust_cons = true;
-
-    if (use_temp) {
-      recomp_eps_press_entropy = true;
-    } else {
-      recomp_eps_press_entropy = false;
-      pv.eps =
-          eos_3p->eps_from_rho_press_ye_pref(pv.rho, pv.press, pv.Ye,
-                                              rad_pref);
-      pv.temperature =
-          eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
-      pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                             od);
-    }
-  }
-
-  if (pv.temperature > eos_3p->rgtemp.max) {
-    pv.temperature = eos_3p->rgtemp.max;
-    recomp_eps_press_entropy = true;
-    rep.adjust_cons = true;
-  }
-
-  if (use_press_atmo) {
-    if (pv.press < atmo.press_atmo) {
-      pv.press = atmo.press_atmo;
-      pv.eps =
-          eos_3p->eps_from_rho_press_ye_pref(pv.rho, pv.press, pv.Ye,
-                                              rad_pref);
-      pv.temperature =
-          eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
-      pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                             od);
-      recomp_eps_press_entropy = false;
-      rep.adjust_cons = true;
-    }
-  } else {
-    if (pv.temperature < atmo.temp_atmo) {
-      pv.temperature = atmo.temp_atmo;
-      recomp_eps_press_entropy = true;
-      rep.adjust_cons = true;
-    }
-  }
-
-  if (recomp_eps_press_entropy) {
-    pv.eps =
-        eos_3p->eps_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
-                                          rad_pref);
-    pv.press =
-        eos_3p->press_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
-                                            rad_pref);
-    pv.entropy =
-        eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                           od);
-    recomp_eps_press_entropy = false;
-  }
-
-  v_low = calc_contraction(glo, pv.vel);
-  const vec<CCTK_REAL, 3> B_low = calc_contraction(glo, pv.Bvec);
-
-  const CCTK_REAL Bdotv = calc_contraction(pv.Bvec, v_low);
-  const CCTK_REAL alp_b0 = pv.w_lor * Bdotv;
-
-  const CCTK_REAL B2 = calc_contraction(pv.Bvec, B_low);
-  const CCTK_REAL bsq = (B2 + alp_b0 * alp_b0) / (pv.w_lor * pv.w_lor);
-
-  bool mag_ceiling = false;
-
-  if (bsq > sigma_max * pv.rho) {
-    pv.rho = bsq / sigma_max;
-    mag_ceiling = true;
-  }
-
-  if (bsq > CCTK_REAL(2.0) * inv_beta_max * pv.press) {
-    pv.press = CCTK_REAL(0.5) * bsq / inv_beta_max;
-    mag_ceiling = true;
-  }
-
-  if (mag_ceiling) {
-
-    rep.adjust_cons = true;
-
-    if (use_temp) {
-      pv.temperature =
-          eos_3p->temp_from_rho_press_ye_pref(pv.rho, pv.press, pv.Ye,
-                                              rad_pref);
-      pv.eps =
-          eos_3p->eps_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
-                                            rad_pref);
-      pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                             od);
-    } else {
-      pv.eps =
-          eos_3p->eps_from_rho_press_ye_pref(pv.rho, pv.press, pv.Ye,
-                                              rad_pref);
-      pv.temperature =
-          eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
-      pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye_tau(pv.rho, pv.temperature, pv.Ye,
-                                             od);
-    }
-
-    const CCTK_REAL B = fmax(sqrt(B2), CCTK_REAL(1.0e-64));
-
-    const CCTK_REAL ut = pv.w_lor / alp;
-
-    const CCTK_REAL u1 = pv.w_lor * (pv.vel(0) - beta(0) / alp);
-    const CCTK_REAL u2 = pv.w_lor * (pv.vel(1) - beta(1) / alp);
-    const CCTK_REAL u3 = pv.w_lor * (pv.vel(2) - beta(2) / alp);
-
-    const CCTK_REAL v_par_old = pv.w_lor * Bdotv / B / ut;
-
-    const CCTK_REAL ut_perp =
-        CCTK_REAL(1.0) /
-        sqrt(CCTK_REAL(1.0) / (ut * ut) + v_par_old * v_par_old);
-
-    const CCTK_REAL u1_perp =
-        ut_perp * (u1 / ut - v_par_old * pv.Bvec(0) / B);
-    const CCTK_REAL u2_perp =
-        ut_perp * (u2 / ut - v_par_old * pv.Bvec(1) / B);
-    const CCTK_REAL u3_perp =
-        ut_perp * (u3 / ut - v_par_old * pv.Bvec(2) / B);
-
-    const CCTK_REAL BdotQ = pv.w_lor * rho_h_fluid_old * Bdotv * ut;
-
-    const CCTK_REAL rho_h_fluid_new = pv.rho + pv.rho * pv.eps + pv.press;
-
-    const CCTK_REAL xx =
-        CCTK_REAL(2.0) * BdotQ / (B * rho_h_fluid_new * ut_perp);
-
-    const CCTK_REAL v_par_new =
-        xx / (CCTK_REAL(1.0) + sqrt(CCTK_REAL(1.0) + xx * xx)) / ut_perp;
-
-    const CCTK_REAL v1_new = v_par_new * pv.Bvec(0) / B + u1_perp / ut_perp;
-    const CCTK_REAL v2_new = v_par_new * pv.Bvec(1) / B + u2_perp / ut_perp;
-    const CCTK_REAL v3_new = v_par_new * pv.Bvec(2) / B + u3_perp / ut_perp;
-
-    pv.vel(0) = (v1_new + beta(0)) / alp;
-    pv.vel(1) = (v2_new + beta(1)) / alp;
-    pv.vel(2) = (v3_new + beta(2)) / alp;
-
-    v_low = calc_contraction(glo, pv.vel);
-    vsq_Sol = calc_contraction(v_low, pv.vel);
-    sol_v = sqrt(vsq_Sol);
-
-    if (sol_v > v_lim) {
-      pv.vel *= v_lim / sol_v;
-      pv.w_lor = w_lim;
-    } else {
-      pv.w_lor = CCTK_REAL(1.0) / sqrt(CCTK_REAL(1.0) - vsq_Sol);
-    }
-  }
-}
-
 template <typename EOSType, bool limiting>
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
-c2p_Noble_rad::bh_interior_tau(const EOSType *eos_3p, prim_vars &pv,
+c2p_Noble_rad::bh_interior_rad(const EOSType *eos_3p, prim_vars &pv,
                                cons_vars &cv,
                                const smat<CCTK_REAL, 3> &glo,
-                               const EOSX::optical_depths &od,
-                               const CCTK_REAL rad_ramp) const {
+                               const CCTK_REAL rad_pref) const {
   const CCTK_REAL wlim_BH = sqrt(CCTK_REAL(1.0) + vwlim_BH * vwlim_BH);
   const CCTK_REAL vlim_BH = vwlim_BH / wlim_BH;
 
@@ -472,14 +257,13 @@ c2p_Noble_rad::bh_interior_tau(const EOSType *eos_3p, prim_vars &pv,
 
     if (recomp_flag) {
       pv.temperature =
-          eos_3p->temp_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, od,
-                                           rad_ramp);
+          eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
       pv.press =
-          eos_3p->press_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, od,
-                                            rad_ramp);
+          eos_3p->press_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye,
+                                             rad_pref);
       pv.entropy =
-          eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, od,
-                                            rad_ramp);
+          eos_3p->kappa_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye,
+                                             rad_pref);
 
       cv.from_prim(pv, glo);
     };
@@ -491,14 +275,11 @@ c2p_Noble_rad::bh_interior_tau(const EOSType *eos_3p, prim_vars &pv,
     pv.Ye = atmo.ye_atmo;
 
     pv.temperature =
-        eos_3p->temp_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, od,
-                                         rad_ramp);
+        eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
     pv.press =
-        eos_3p->press_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, od,
-                                          rad_ramp);
+        eos_3p->press_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
     pv.entropy =
-        eos_3p->kappa_from_rho_eps_ye_tau(pv.rho, pv.eps, pv.Ye, od,
-                                          rad_ramp);
+        eos_3p->kappa_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
 
     const CCTK_REAL spatial_detg = calc_det(glo);
     const smat<CCTK_REAL, 3> gup = calc_inv(glo, spatial_detg);
@@ -543,8 +324,7 @@ CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
 c2p_Noble_rad::solve(const EOSType *eos_3p, prim_vars &pv,
                      prim_vars &pv_seeds, cons_vars &cv, const CCTK_REAL alp,
                      const vec<CCTK_REAL, 3> &beta,
-                     const smat<CCTK_REAL, 3> &glo,
-                     const EOSX::optical_depths &od, const CCTK_REAL rad_ramp,
+                     const smat<CCTK_REAL, 3> &glo, const CCTK_REAL rad_pref,
                      c2p_report &rep) const {
   rep.iters = 0;
   rep.adjust_cons = false;
@@ -580,7 +360,6 @@ c2p_Noble_rad::solve(const EOSType *eos_3p, prim_vars &pv,
   const CCTK_REAL Ssq = get_Ssq_Exact(cv.mom, gup);
   const CCTK_REAL Bsq = get_Bsq_Exact(pv_seeds.Bvec, glo);
   const CCTK_REAL BiSi = get_BiSi_Exact(pv_seeds.Bvec, cv.mom);
-  const CCTK_REAL rad_pref = eos_3p->rad_prefactor(od, rad_ramp);
 
   vec<CCTK_REAL, 3> w_vsq_bsq;
   if (use_zprim) {
@@ -701,8 +480,8 @@ c2p_Noble_rad::solve(const EOSType *eos_3p, prim_vars &pv,
     return;
   }
 
-  prims_floors_and_ceilings_tau(eos_3p, pv, cv, alp, beta, glo, od,
-                                rad_pref, rep);
+  prims_floors_and_ceilings_rad(eos_3p, pv, cv, alp, beta, glo, rad_pref,
+                                rep);
 
   if (rep.adjust_cons) {
     cv.from_prim(pv, glo);

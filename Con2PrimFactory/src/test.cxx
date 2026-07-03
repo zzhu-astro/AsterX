@@ -36,21 +36,100 @@ extern "C" void Con2PrimFactory_Test(CCTK_ARGUMENTS) {
       const CCTK_REAL rho_test = 0.125;
       const CCTK_REAL temp_test = 0.2;
       const CCTK_REAL Ye_test = 0.5;
-      const CCTK_REAL press_tau0 = eos_3p_rad_ig->press_from_rho_temp_ye_tau(
-          rho_test, temp_test, Ye_test, EOSX::optical_depths{0.0, 0.0, 0.0});
-      const CCTK_REAL eps_tau0 = eos_3p_rad_ig->eps_from_rho_temp_ye_tau(
-          rho_test, temp_test, Ye_test, EOSX::optical_depths{0.0, 0.0, 0.0});
-      const CCTK_REAL press_tau1 = eos_3p_rad_ig->press_from_rho_temp_ye_tau(
-          rho_test, temp_test, Ye_test, EOSX::optical_depths{1.0, 1.0, 1.0});
-      const CCTK_REAL cs_tau1 = eos_3p_rad_ig->csnd_from_rho_temp_ye_tau(
-          rho_test, temp_test, Ye_test, EOSX::optical_depths{1.0, 1.0, 1.0});
+      // Optical depths enter the EOS only through the radiation prefactor.
+      const CCTK_REAL pref0 = eos_3p_rad_ig->rad_prefactor(
+          EOSX::optical_depths{0.0, 0.0, 0.0});
+      const CCTK_REAL pref1 = eos_3p_rad_ig->rad_prefactor(
+          EOSX::optical_depths{1.0, 1.0, 1.0});
+      const CCTK_REAL press_tau0 = eos_3p_rad_ig->press_from_rho_temp_ye_pref(
+          rho_test, temp_test, Ye_test, pref0);
+      const CCTK_REAL eps_tau0 = eos_3p_rad_ig->eps_from_rho_temp_ye_pref(
+          rho_test, temp_test, Ye_test, pref0);
+      const CCTK_REAL press_tau1 = eos_3p_rad_ig->press_from_rho_temp_ye_pref(
+          rho_test, temp_test, Ye_test, pref1);
+      const CCTK_REAL cs_tau1 = eos_3p_rad_ig->csnd_from_rho_temp_ye_pref(
+          rho_test, temp_test, Ye_test, pref1);
 
+      assert(pref0 == 0.0);
       assert(fabs(press_tau0 - rho_test * temp_test) <=
              1.0e-12 * fmax(1.0, fabs(rho_test * temp_test)));
       assert(fabs(eps_tau0 - temp_test / eos_3p_rad_ig->gm1) <=
              1.0e-12 * fmax(1.0, fabs(temp_test / eos_3p_rad_ig->gm1)));
       assert(press_tau1 >= press_tau0);
       assert(isfinite(cs_tau1) && cs_tau1 >= 0.0 && cs_tau1 < 1.0);
+
+      // Testing C2P Palenzuela with the radiation EOS: prim -> cons -> prim
+      // round-trip at finite radiation prefactor.
+      CCTK_VINFO("Testing C2P Palenzuela (radiation)...");
+
+      // Atmosphere built with the ordinary no-tau EOS methods (invariant:
+      // the atmosphere must never be radiation-dominated).
+      const CCTK_REAL rho_atmo_r = 1e-10;
+      CCTK_REAL eps_atmo_r = 1e-8;
+      const CCTK_REAL Ye_atmo_r = 0.5;
+      const CCTK_REAL press_atmo_r = eos_3p_rad_ig->press_from_rho_eps_ye(
+          rho_atmo_r, eps_atmo_r, Ye_atmo_r);
+      const CCTK_REAL temp_atmo_r = eos_3p_rad_ig->temp_from_rho_eps_ye(
+          rho_atmo_r, eps_atmo_r, Ye_atmo_r);
+      const CCTK_REAL entropy_atmo_r = eos_3p_rad_ig->kappa_from_rho_eps_ye(
+          rho_atmo_r, eps_atmo_r, Ye_atmo_r);
+      atmosphere atmo_r(rho_atmo_r, eps_atmo_r, Ye_atmo_r, press_atmo_r,
+                        temp_atmo_r, entropy_atmo_r,
+                        rho_atmo_r * (1 + 1.0e-3));
+
+      const CCTK_REAL alp_r = 1.0;
+      const vec<CCTK_REAL, 3> beta_r{0.0, 0.0, 0.0};
+      const smat<CCTK_REAL, 3> g_r{1.0, 0.0, 0.0, 1.0, 0.0, 1.0};
+
+      c2p_1DPalenzuela c2p_Pal_r(
+          eos_3p_rad_ig, atmo_r, 100, 1e-8, -1., 1, 1, 1e20, 1e20, 1e20,
+          100., 100., true, false, false, false, false, 1.0);
+
+      const CCTK_REAL rad_pref_test =
+          eos_3p_rad_ig->rad_prefactor(EOSX::optical_depths{1.0, 1.0, 1.0});
+
+      // Prim seeds thermodynamically consistent with the radiation EOS at
+      // the local radiation prefactor.
+      const CCTK_REAL rho_r = 0.125;
+      const CCTK_REAL temp_r = 0.2;
+      const CCTK_REAL Ye_r = 0.5;
+      CCTK_REAL eps_r = eos_3p_rad_ig->eps_from_rho_temp_ye_pref(
+          rho_r, temp_r, Ye_r, rad_pref_test);
+      const CCTK_REAL press_r = eos_3p_rad_ig->press_from_rho_temp_ye_pref(
+          rho_r, temp_r, Ye_r, rad_pref_test);
+      const CCTK_REAL entropy_r = eos_3p_rad_ig->kappa_from_rho_eps_ye_pref(
+          rho_r, eps_r, Ye_r, rad_pref_test);
+      const vec<CCTK_REAL, 3> vup_r = {0.0, 0.0, 0.0};
+      const vec<CCTK_REAL, 3> Bup_r = {0.5, -0.5, 0.0};
+      const vec<CCTK_REAL, 3> vdown_r = calc_contraction(g_r, vup_r);
+      const CCTK_REAL wlor_r = calc_wlorentz(vdown_r, vup_r);
+
+      prim_vars pv_r;
+      prim_vars pv_seeds_r{rho_r,     eps_r, Ye_r,   press_r, temp_r,
+                           entropy_r, vup_r, wlor_r, Bup_r};
+
+      cons_vars cv_r;
+      cv_r.from_prim(pv_seeds_r, g_r);
+
+      c2p_report rep_Pal_rad;
+      c2p_Pal_r.solve(eos_3p_rad_ig, pv_r, cv_r, alp_r, beta_r, g_r,
+                      rad_pref_test, rep_Pal_rad);
+
+      printf("Palenzuela (radiation) pv_seeds, pv: \n"
+             "rho: %f, %f \n"
+             "eps: %f, %f \n"
+             "press: %f, %f \n"
+             "temperature: %f, %f \n",
+             pv_seeds_r.rho, pv_r.rho, pv_seeds_r.eps, pv_r.eps,
+             pv_seeds_r.press, pv_r.press, pv_seeds_r.temperature,
+             pv_r.temperature);
+      rep_Pal_rad.debug_message();
+
+      assert(!rep_Pal_rad.failed());
+      assert(fabs(pv_r.rho - rho_r) <= 1.0e-6 * fmax(1.0, fabs(rho_r)));
+      assert(fabs(pv_r.eps - eps_r) <= 1.0e-6 * fmax(1.0, fabs(eps_r)));
+      assert(fabs(pv_r.temperature - temp_r) <=
+             1.0e-6 * fmax(1.0, fabs(temp_r)));
     }
     return;
   }

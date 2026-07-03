@@ -41,42 +41,45 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
         CCTK_REAL pressL = press(p.I);
         CCTK_REAL YeL = Ye(p.I);
         CCTK_REAL tempL = temperature(p.I);
+        // Radiation prefactor: sole radiation input to the EOS calls below.
         const EOSX::optical_depths od_local = local_optd<EOSType>(od_gfs, p.I);
+        const CCTK_REAL rad_pref_local =
+            eos_rad_prefactor(eos_3p, od_local, rad_ramp);
         const auto press_from_rho_temp =
             [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
                 const CCTK_REAL ye_) ARITH_INLINE {
 	              return eos_press_from_rho_temp(eos_3p, rho_, temp_, ye_,
-	                                             od_local, rad_ramp);
+	                                             rad_pref_local);
             };
         const auto eps_from_rho_temp =
             [&](const CCTK_REAL rho_, const CCTK_REAL temp_,
                 const CCTK_REAL ye_) ARITH_INLINE {
 	              return eos_eps_from_rho_temp(eos_3p, rho_, temp_, ye_,
-	                                           od_local, rad_ramp);
+	                                           rad_pref_local);
             };
         const auto eps_from_rho_press =
             [&](const CCTK_REAL rho_, const CCTK_REAL press_,
                 const CCTK_REAL ye_) ARITH_INLINE {
 	              return eos_eps_from_rho_press(eos_3p, rho_, press_, ye_,
-	                                            od_local, rad_ramp);
+	                                            rad_pref_local);
             };
         const auto temp_from_rho_eps =
             [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
                 const CCTK_REAL ye_) ARITH_INLINE {
 	              return eos_temp_from_rho_eps(eos_3p, rho_, eps_, ye_,
-	                                           od_local, rad_ramp);
+	                                           rad_pref_local);
             };
         const auto press_from_rho_eps =
             [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
                 const CCTK_REAL ye_) ARITH_INLINE {
 	              return eos_press_from_rho_eps(eos_3p, rho_, eps_, ye_,
-	                                            od_local, rad_ramp);
+	                                            rad_pref_local);
             };
         const auto entropy_from_rho_eps =
             [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
                 const CCTK_REAL ye_) ARITH_INLINE {
 	              return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_,
-	                                            od_local, rad_ramp);
+	                                            rad_pref_local);
             };
         // Consistent entropy
         CCTK_REAL entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);
