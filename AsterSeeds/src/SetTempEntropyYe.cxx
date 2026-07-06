@@ -15,6 +15,23 @@
 using namespace EOSX;
 enum class eos_3param { IdealGas, RadIdealGas, Hybrid, Tabulated };
 
+// Entropy variable evolved in DEnt: offset physical specific entropy for
+// Rad_idealgas (seeded with pref = 0, exact at t = 0 when the radiation ramp
+// starts at zero), polytropic kappa for every other EOS. The if constexpr
+// dispatch must live outside the device lambda: nvcc rejects a captured
+// variable whose first use is inside a constexpr-if context in an extended
+// __device__ lambda.
+template <typename EOSType>
+CCTK_DEVICE CCTK_HOST CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
+seed_entropy_from_rho_eps_ye(const EOSType *eos_3p, const CCTK_REAL rho,
+                             CCTK_REAL &eps, const CCTK_REAL ye) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    return eos_3p->entropy_from_rho_eps_ye(rho, eps, ye);
+  } else {
+    return eos_3p->kappa_from_rho_eps_ye(rho, eps, ye);
+  }
+}
+
 template <typename EOSType>
 void SetTemp_typeEoS(CCTK_ARGUMENTS, EOSType *eos_3p) {
 
@@ -38,15 +55,8 @@ void SetEntropy_typeEoS(CCTK_ARGUMENTS, EOSType *eos_3p) {
   grid.loop_all_device<1, 1, 1>(
       grid.nghostzones,
       [=] CCTK_DEVICE(const Loop::PointDesc &p) CCTK_ATTRIBUTE_ALWAYS_INLINE {
-        // Rad_idealgas evolves the offset physical entropy; seed with
-        // pref = 0 (exact at t = 0 when the radiation ramp starts at zero).
-        if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-          entropy(p.I) =
-              eos_3p->entropy_from_rho_eps_ye(rho(p.I), eps(p.I), Ye(p.I));
-        } else {
-          entropy(p.I) =
-              eos_3p->kappa_from_rho_eps_ye(rho(p.I), eps(p.I), Ye(p.I));
-        }
+        entropy(p.I) =
+            seed_entropy_from_rho_eps_ye(eos_3p, rho(p.I), eps(p.I), Ye(p.I));
       });
 }
 
