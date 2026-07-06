@@ -112,6 +112,17 @@ SCHEDULE AsterX_CheckPrims IN AsterX_InitialGroup AFTER AsterX_ComputeBFromdB
   WRITES: svec(everywhere)
 } "Enforce limits on primitive variables"
 
+if (report_c2p_failures)
+{
+  SCHEDULE AsterX_C2PFailureReport IN AsterX_Con2PrimGroup AFTER AsterX_Con2Prim
+  {
+    LANG: C
+    READS: con2prim_flag(interior)
+    READS: cons_vector(interior) dB(interior)
+  } "Print failed C2P points to stderr"
+}
+
+
 SCHEDULE AsterX_Prim2Con_Initial IN AsterX_InitialGroup AFTER AsterX_CheckPrims
 {
   LANG: C

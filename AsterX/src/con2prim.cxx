@@ -833,4 +833,24 @@ extern "C" void AsterX_Con2Prim_Interpolate_Failed(CCTK_ARGUMENTS) {
       });
 }
 
+
+extern "C" void AsterX_C2PFailureReport(CCTK_ARGUMENTS) {
+  DECLARE_CCTK_ARGUMENTSX_AsterX_C2PFailureReport;
+  DECLARE_CCTK_PARAMETERS;
+
+  grid.loop_int<1, 1, 1>(grid.nghostzones, [&](const PointDesc &p) {
+    if (con2prim_flag(p.I) == C2P_FAIL) {
+      CCTK_VWARN(CCTK_WARN_ALERT,
+                 "C2P failed: it=%d, index=(%d,%d,%d), xyz=(%.6e,%.6e,%.6e), "
+                 "dens=%.16e, momx=%.16e, momy=%.16e, momz=%.16e, "
+                 "tau=%.16e, DYe=%.16e, DEnt=%.16e, "
+                 "dBx=%.16e, dBy=%.16e, dBz=%.16e, con2prim_flag=%d",
+                 cctk_iteration, p.i, p.j, p.k, p.x, p.y, p.z,
+                 dens(p.I), momx(p.I), momy(p.I), momz(p.I), tau(p.I),
+                 DYe(p.I), DEnt(p.I), dBx(p.I), dBy(p.I), dBz(p.I),
+                 int(con2prim_flag(p.I)));
+    }
+  });
+}
+
 } // namespace AsterX

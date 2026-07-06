@@ -113,6 +113,10 @@ BOOLEAN interpolate_failed_c2p "Interpolate those grid points where c2p failed."
 {
 } no
 
+BOOLEAN report_c2p_failures "Print failed C2P points to stderr" STEERABLE=never
+{
+} no
+
 CCTK_INT local_spatial_order "Order of spatial finite differencing" STEERABLE=always
 {
   2 :: "Second order finite difference"
