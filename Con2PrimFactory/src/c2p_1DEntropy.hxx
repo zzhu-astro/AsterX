@@ -5,6 +5,26 @@
 #include "roots.hxx"
 namespace Con2PrimFactory {
 
+// Closure helpers for the entropy scheme. ent_loc = cv.DEnt/cv.dens is the
+// evolved entropy variable: offset physical s for Rad_idealgas (inverted to T
+// via temp_from_rho_entropy_ye_pref), polytropic kappa otherwise.
+template <typename EOSType>
+CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+ent_press_eps_temp_from_rho_ent_ye(const EOSType *eos_3p, const CCTK_REAL rho,
+                                   const CCTK_REAL ent_loc, const CCTK_REAL ye,
+                                   const CCTK_REAL rad_pref, CCTK_REAL &press,
+                                   CCTK_REAL &eps, CCTK_REAL &temp) {
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    temp = eos_3p->temp_from_rho_entropy_ye_pref(rho, ent_loc, ye, rad_pref);
+    press = eos_3p->press_from_rho_temp_ye_pref(rho, temp, ye, rad_pref);
+    eps = eos_3p->eps_from_rho_temp_ye_pref(rho, temp, ye, rad_pref);
+  } else {
+    press = eos_3p->press_from_rho_kappa_ye(rho, ent_loc, ye);
+    eps = eos_3p->eps_from_rho_kappa_ye(rho, ent_loc, ye);
+    temp = eos_3p->temp_from_rho_eps_ye(rho, eps, ye);
+  }
+}
+
 class c2p_1DEntropy : public c2p {
 public:
   /* Some attributes */
@@ -41,12 +61,21 @@ public:
   xEntropyToPrim(CCTK_REAL xEntropy_Sol, CCTK_REAL Ssq, CCTK_REAL Bsq,
                  CCTK_REAL BiSi, const EOSType *eos_3p, prim_vars &pv,
                  const cons_vars &cv, const smat<CCTK_REAL, 3> &gup,
-                 const smat<CCTK_REAL, 3> &glo) const;
+                 const smat<CCTK_REAL, 3> &glo,
+                 const CCTK_REAL rad_pref) const;
 
   template <typename EOSType>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   funcRoot_1DEntropy(CCTK_REAL Ssq, CCTK_REAL Bsq, CCTK_REAL BiSi, CCTK_REAL x,
-                     const EOSType *eos_3p, const cons_vars &cv) const;
+                     const EOSType *eos_3p, const cons_vars &cv,
+                     const CCTK_REAL rad_pref) const;
+
+  template <typename EOSType>
+  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+  solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
+        const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
+        const smat<CCTK_REAL, 3> &glo, const CCTK_REAL rad_pref,
+        c2p_report &rep) const;
 
   template <typename EOSType>
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
@@ -151,7 +180,8 @@ c2p_1DEntropy::xEntropyToPrim(CCTK_REAL xEntropy_Sol, CCTK_REAL Ssq,
                               const EOSType *eos_3p, prim_vars &pv,
                               const cons_vars &cv,
                               const smat<CCTK_REAL, 3> &gup,
-                              const smat<CCTK_REAL, 3> &glo) const {
+                              const smat<CCTK_REAL, 3> &glo,
+                              const CCTK_REAL rad_pref) const {
   // Density, entropy, Ye
   pv.rho = xEntropy_Sol;
   pv.entropy = cv.DEnt / cv.dens;
@@ -160,12 +190,10 @@ c2p_1DEntropy::xEntropyToPrim(CCTK_REAL xEntropy_Sol, CCTK_REAL Ssq,
   // Lorentz factor
   pv.w_lor = cv.dens / xEntropy_Sol;
 
-  // Pressure and epsilon
-  pv.press = eos_3p->press_from_rho_kappa_ye(xEntropy_Sol, pv.entropy, pv.Ye);
-  pv.eps = eos_3p->eps_from_rho_kappa_ye(xEntropy_Sol, pv.entropy, pv.Ye);
-
-  // Temperature
-  pv.temperature = eos_3p->temp_from_rho_eps_ye(xEntropy_Sol, pv.eps, pv.Ye);
+  // Pressure, epsilon and temperature from the evolved entropy
+  ent_press_eps_temp_from_rho_ent_ye(eos_3p, xEntropy_Sol, pv.entropy, pv.Ye,
+                                     rad_pref, pv.press, pv.eps,
+                                     pv.temperature);
 
   // Taken from WZ2Prim (2DNRNoble)
   // Z_Sol = rho * h * w_lor * w_lor
@@ -237,7 +265,8 @@ template <typename EOSType>
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
 c2p_1DEntropy::funcRoot_1DEntropy(CCTK_REAL Ssq, CCTK_REAL Bsq, CCTK_REAL BiSi,
                                   CCTK_REAL x, const EOSType *eos_3p,
-                                  const cons_vars &cv) const {
+                                  const cons_vars &cv,
+                                  const CCTK_REAL rad_pref) const {
 
   // We already divided dens, DEnt and
   // DYe by sqrt(gamma)
@@ -245,11 +274,10 @@ c2p_1DEntropy::funcRoot_1DEntropy(CCTK_REAL Ssq, CCTK_REAL Bsq, CCTK_REAL BiSi,
   const CCTK_REAL ent_loc = cv.DEnt / cv.dens;
   const CCTK_REAL ye_loc = cv.DYe / cv.dens;
 
-  // Compute h using entropy
-  const CCTK_REAL press_loc =
-      eos_3p->press_from_rho_kappa_ye(x, ent_loc, ye_loc);
-
-  const CCTK_REAL eps_loc = eos_3p->eps_from_rho_kappa_ye(x, ent_loc, ye_loc);
+  // Compute h using the evolved entropy (temp unused in the residual)
+  CCTK_REAL press_loc, eps_loc, temp_loc;
+  ent_press_eps_temp_from_rho_ent_ye(eos_3p, x, ent_loc, ye_loc, rad_pref,
+                                     press_loc, eps_loc, temp_loc);
 
   // Compute (A60) using
   // W = rho*h*lorentz*lorentz
@@ -272,7 +300,8 @@ template <typename EOSType>
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
 c2p_1DEntropy::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
                      const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
-                     const smat<CCTK_REAL, 3> &glo, c2p_report &rep) const {
+                     const smat<CCTK_REAL, 3> &glo, const CCTK_REAL rad_pref,
+                     c2p_report &rep) const {
 
   ROOTSTAT status = ROOTSTAT::SUCCESS;
   rep.iters = 0;
@@ -348,7 +377,7 @@ c2p_1DEntropy::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
   CCTK_REAL a = cv.dens / sqrt(1.0 + Ssq / (cv.dens * cv.dens));
   CCTK_REAL b = cv.dens;
   auto fn = [&](auto x) {
-    return funcRoot_1DEntropy(Ssq, Bsq, BiSi, x, eos_3p, cv);
+    return funcRoot_1DEntropy(Ssq, Bsq, BiSi, x, eos_3p, cv, rad_pref);
   };
 
   // Important!
@@ -376,7 +405,8 @@ c2p_1DEntropy::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
 
   CCTK_REAL xEntropy_Sol = 0.5 * (result.first + result.second);
 
-  xEntropyToPrim(xEntropy_Sol, Ssq, Bsq, BiSi, eos_3p, pv, cv, gup, glo);
+  xEntropyToPrim(xEntropy_Sol, Ssq, Bsq, BiSi, eos_3p, pv, cv, gup, glo,
+                 rad_pref);
 
   // Check solution and calculate primitives
   //  if (rep.iters < maxiters && abs(fn(xEntropy_Sol)) < tolerance) {
@@ -435,7 +465,12 @@ c2p_1DEntropy::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
     return;
   }
 
-  c2p::prims_floors_and_ceilings(eos_3p, pv, cv, alp, beta, glo, rep);
+  if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+    c2p::prims_floors_and_ceilings_rad(eos_3p, pv, cv, alp, beta, glo,
+                                       rad_pref, rep);
+  } else {
+    c2p::prims_floors_and_ceilings(eos_3p, pv, cv, alp, beta, glo, rep);
+  }
 
   // Recompute cons if prims have been adjusted
   if (rep.adjust_cons) {
@@ -456,6 +491,15 @@ c2p_1DEntropy::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
                           (pv.press + 0.5 * bs2) - bst * bst) -
              cv.dens;
   }
+}
+
+/* Legacy overload: entropy scheme without a radiation prefactor */
+template <typename EOSType>
+CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
+c2p_1DEntropy::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
+                     const CCTK_REAL alp, const vec<CCTK_REAL, 3> &beta,
+                     const smat<CCTK_REAL, 3> &glo, c2p_report &rep) const {
+  solve(eos_3p, pv, cv, alp, beta, glo, CCTK_REAL(0.0), rep);
 }
 
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void

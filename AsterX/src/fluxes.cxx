@@ -257,7 +257,8 @@ void CalcFlux(CCTK_ARGUMENTS, EOSType *eos_3p, const rec_var_t rec_var,
     const auto entropy_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_, const CCTK_REAL ye_,
 	            const CCTK_REAL pref_) ARITH_INLINE {
-	          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_, pref_);
+	          return eos_entropy_evolved_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                                  pref_);
 	        };
     const auto csnd_from_rho_temp =
         [&](const CCTK_REAL rho_, const CCTK_REAL temp_, const CCTK_REAL ye_,

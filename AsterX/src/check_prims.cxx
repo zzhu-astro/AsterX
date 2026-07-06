@@ -78,8 +78,8 @@ void CheckPrims(CCTK_ARGUMENTS, EOSIDType *eos_1p, EOSType *eos_3p) {
         const auto entropy_from_rho_eps =
             [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
                 const CCTK_REAL ye_) ARITH_INLINE {
-	              return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_,
-	                                            rad_pref_local);
+	              return eos_entropy_evolved_from_rho_eps(eos_3p, rho_, eps_,
+	                                                      ye_, rad_pref_local);
             };
         // Consistent entropy
         CCTK_REAL entropyL = entropy_from_rho_eps(rhoL, epsL, YeL);

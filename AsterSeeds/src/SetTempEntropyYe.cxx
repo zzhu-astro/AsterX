@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdbool>
 #include <cmath>
+#include <type_traits>
 
 #include <setup_eos.hxx>
 
@@ -37,8 +38,15 @@ void SetEntropy_typeEoS(CCTK_ARGUMENTS, EOSType *eos_3p) {
   grid.loop_all_device<1, 1, 1>(
       grid.nghostzones,
       [=] CCTK_DEVICE(const Loop::PointDesc &p) CCTK_ATTRIBUTE_ALWAYS_INLINE {
-        entropy(p.I) =
-            eos_3p->kappa_from_rho_eps_ye(rho(p.I), eps(p.I), Ye(p.I));
+        // Rad_idealgas evolves the offset physical entropy; seed with
+        // pref = 0 (exact at t = 0 when the radiation ramp starts at zero).
+        if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
+          entropy(p.I) =
+              eos_3p->entropy_from_rho_eps_ye(rho(p.I), eps(p.I), Ye(p.I));
+        } else {
+          entropy(p.I) =
+              eos_3p->kappa_from_rho_eps_ye(rho(p.I), eps(p.I), Ye(p.I));
+        }
       });
 }
 

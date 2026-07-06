@@ -37,13 +37,15 @@ pal_temp_from_rho_eps_ye(const EOSType *eos_3p, const CCTK_REAL rho,
   }
 }
 
+// Entropy variable evolved in DEnt: offset physical specific entropy for
+// Rad_idealgas, polytropic kappa for every other EOS.
 template <typename EOSType>
 CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
-pal_kappa_from_rho_eps_ye(const EOSType *eos_3p, const CCTK_REAL rho,
-                          CCTK_REAL &eps, const CCTK_REAL ye,
-                          const CCTK_REAL rad_pref) {
+pal_entropy_from_rho_eps_ye(const EOSType *eos_3p, const CCTK_REAL rho,
+                            CCTK_REAL &eps, const CCTK_REAL ye,
+                            const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos_3p->kappa_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
+    return eos_3p->entropy_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
   } else {
     return eos_3p->kappa_from_rho_eps_ye(rho, eps, ye);
   }
@@ -313,8 +315,8 @@ c2p_1DPalenzuela::xPalenzuelaToPrim(CCTK_REAL xPalenzuela_Sol, CCTK_REAL Ssq,
   pv.temperature = pal_temp_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
                                             rad_pref);
 
-  pv.entropy = pal_kappa_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
-                                         rad_pref);
+  pv.entropy = pal_entropy_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                           rad_pref);
 
   pv.Bvec = cv.dBvec;
 
@@ -598,8 +600,8 @@ c2p_1DPalenzuela::solve(const EOSType *eos_3p, prim_vars &pv, cons_vars &cv,
                                          rad_pref);
     pv.temperature = pal_temp_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
                                               rad_pref);
-    pv.entropy = pal_kappa_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
-                                           rad_pref);
+    pv.entropy = pal_entropy_from_rho_eps_ye(eos_3p, pv.rho, pv.eps, pv.Ye,
+                                             rad_pref);
     rep.adjust_cons = true;
   }
 

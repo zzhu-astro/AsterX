@@ -189,6 +189,10 @@ extern "C" void EOSX_Setup_EOS(CCTK_ARGUMENTS) {
       CCTK_ERROR("EOSX::evolution_eos = \"Rad_idealgas\" requires active "
                  "LeakageBaseX.");
     }
+    if (!(eps_min > 0.0)) {
+      CCTK_ERROR("EOSX::evolution_eos = \"Rad_idealgas\" requires EOSX::eps_min > 0 "
+                 "(T_0 = (gl_gamma-1)*eps_min defines the entropy offset).");
+    }
     const CCTK_REAL arad_code = rad_a_constant_from_leakage_units();
     const CCTK_REAL a_tau = lkx_constants::runtime_constants().a_tau;
     global_eos_3p_rad_ig =

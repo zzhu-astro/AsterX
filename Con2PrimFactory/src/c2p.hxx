@@ -376,7 +376,8 @@ c2p::prims_floors_and_ceilings_rad(
       pv.temperature =
           eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
       pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
+          eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                                rad_pref);
     }
   }
 
@@ -394,7 +395,8 @@ c2p::prims_floors_and_ceilings_rad(
       pv.temperature =
           eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
       pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
+          eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                                rad_pref);
     }
   }
 
@@ -413,7 +415,8 @@ c2p::prims_floors_and_ceilings_rad(
       pv.temperature =
           eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
       pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
+          eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                                rad_pref);
       recomp_eps_press_entropy = false;
       rep.adjust_cons = true;
     }
@@ -433,7 +436,8 @@ c2p::prims_floors_and_ceilings_rad(
         eos_3p->press_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
                                             rad_pref);
     pv.entropy =
-        eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
+        eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                                rad_pref);
     recomp_eps_press_entropy = false;
   }
 
@@ -470,7 +474,8 @@ c2p::prims_floors_and_ceilings_rad(
           eos_3p->eps_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
                                             rad_pref);
       pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
+          eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                                rad_pref);
     } else {
       pv.eps =
           eos_3p->eps_from_rho_press_ye_pref(pv.rho, pv.press, pv.Ye,
@@ -478,7 +483,8 @@ c2p::prims_floors_and_ceilings_rad(
       pv.temperature =
           eos_3p->temp_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
       pv.entropy =
-          eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
+          eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                                rad_pref);
     }
 
     const CCTK_REAL B = fmax(sqrt(B2), CCTK_REAL(1.0e-64));

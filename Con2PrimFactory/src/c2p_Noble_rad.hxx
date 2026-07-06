@@ -216,7 +216,8 @@ private:
     pv.press = eos_3p->press_from_rho_temp_ye_pref(pv.rho, pv.temperature,
                                                    pv.Ye, rad_pref);
     pv.entropy =
-        eos_3p->kappa_from_rho_temp_ye(pv.rho, pv.temperature, pv.Ye);
+        eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                              rad_pref);
     pv.Bvec = cv.dBvec;
 
     const vec<CCTK_REAL, 3> Elow = calc_cross_product(pv.Bvec, pv.vel);
@@ -262,8 +263,8 @@ c2p_Noble_rad::bh_interior_rad(const EOSType *eos_3p, prim_vars &pv,
           eos_3p->press_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye,
                                              rad_pref);
       pv.entropy =
-          eos_3p->kappa_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye,
-                                             rad_pref);
+          eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature,
+                                                pv.Ye, rad_pref);
 
       cv.from_prim(pv, glo);
     };
@@ -279,7 +280,8 @@ c2p_Noble_rad::bh_interior_rad(const EOSType *eos_3p, prim_vars &pv,
     pv.press =
         eos_3p->press_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
     pv.entropy =
-        eos_3p->kappa_from_rho_eps_ye_pref(pv.rho, pv.eps, pv.Ye, rad_pref);
+        eos_3p->entropy_from_rho_temp_ye_pref(pv.rho, pv.temperature, pv.Ye,
+                                              rad_pref);
 
     const CCTK_REAL spatial_detg = calc_det(glo);
     const smat<CCTK_REAL, 3> gup = calc_inv(glo, spatial_detg);

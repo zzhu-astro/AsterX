@@ -200,12 +200,15 @@ eos_press_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
   }
 }
 
+// Entropy variable evolved in DEnt: offset physical specific entropy for
+// Rad_idealgas, polytropic kappa for every other EOS.
 template <typename EOSType>
 CCTK_DEVICE CCTK_HOST inline CCTK_REAL
-eos_kappa_from_rho_eps(const EOSType *eos, const CCTK_REAL rho, CCTK_REAL &eps,
-                       const CCTK_REAL ye, const CCTK_REAL rad_pref) {
+eos_entropy_evolved_from_rho_eps(const EOSType *eos, const CCTK_REAL rho,
+                                 CCTK_REAL &eps, const CCTK_REAL ye,
+                                 const CCTK_REAL rad_pref) {
   if constexpr (std::is_same_v<EOSType, EOSX::eos_3p_rad_idealgas>) {
-    return eos->kappa_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
+    return eos->entropy_from_rho_eps_ye_pref(rho, eps, ye, rad_pref);
   } else {
     return eos->kappa_from_rho_eps_ye(rho, eps, ye);
   }

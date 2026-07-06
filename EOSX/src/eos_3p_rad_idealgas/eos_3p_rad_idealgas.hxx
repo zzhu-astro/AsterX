@@ -27,6 +27,7 @@ class eos_3p_rad_idealgas : public eos_3p {
 public:
   CCTK_REAL gamma, gm1, inv_gamma, temp_over_eps;
   CCTK_REAL arad_code, a_tau;     // emit/abs prefactor scale a_tau
+  CCTK_REAL entropy_offset;
   range rgeps;
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline void
@@ -46,6 +47,14 @@ public:
     set_range_rho(rgrho_);
     set_range_ye(rgye_);
     set_range_temp(range(temp_over_eps * rgeps.min, temp_over_eps * rgeps.max));
+    if (!(rgtemp.min > 0.0)) {
+      printf("EOS_RadIdealGas: requires rgtemp.min > 0 (i.e. EOSX::eps_min > 0) "
+             "for the offset physical entropy.\n");
+      assert(false);
+    }
+    // Offset making the evolved physical entropy positive by construction:
+    // C = -ln(T_0)/gm1 with T_0 = rgtemp.min, rho_0 = 1 (code units).
+    entropy_offset = -log(rgtemp.min) / gm1;
   }
 
   // Sole entry point where optical depths are consumed.
@@ -112,14 +121,64 @@ public:
     return sqrt(fmin(fmax(cs2, CCTK_REAL(0.0)), CCTK_REAL(0.999999)));
   }
 
+  // Offset physical specific entropy:
+  //   s = 4*pref*T^3/(3*rho) + ln(T * rho^(-gm1) / T_0) / gm1,  T_0 = rgtemp.min
+  // Positive by construction for T >= rgtemp.min and rho <= 1 (code units).
+  // Satisfies T ds = deps + P d(1/rho) at fixed pref.
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
   entropy_from_rho_temp_ye_pref(const CCTK_REAL rho, const CCTK_REAL temp,
                                 const CCTK_REAL ye,
                                 const CCTK_REAL pref) const {
-    const CCTK_REAL eps_gas = temp / gm1;
-    return log(eps_gas * pow(rho, -gm1)) +
-           gm1 * CCTK_REAL(4.0) * pref * temp * temp * temp /
-               (CCTK_REAL(3.0) * rho);
+    const CCTK_REAL t3 = temp * temp * temp;
+    return CCTK_REAL(4.0) * pref * t3 / (CCTK_REAL(3.0) * rho) +
+           log(temp * pow(rho, -gm1)) / gm1 + entropy_offset;
+  }
+
+  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
+  entropy_from_rho_eps_ye_pref(const CCTK_REAL rho, CCTK_REAL &eps,
+                               const CCTK_REAL ye, const CCTK_REAL pref) const {
+    const CCTK_REAL temp = temp_from_rho_eps_ye_pref(rho, eps, ye, pref);
+    return entropy_from_rho_temp_ye_pref(rho, temp, ye, pref);
+  }
+
+  // Invert s(rho, T) for T at fixed pref: Newton on
+  //   f(T)  = s(rho,T) - s,
+  //   f'(T) = 1/(gm1*T) + 4*pref*T^2/rho   (strictly positive => well-posed)
+  CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
+  temp_from_rho_entropy_ye_pref(const CCTK_REAL rho, const CCTK_REAL entropy,
+                                const CCTK_REAL ye, const CCTK_REAL pref) const {
+    // Gas-only closed form: s = ln(T*rho^-gm1/T_0)/gm1  =>  T = T_0*exp(gm1*s)*rho^gm1
+    const CCTK_REAL temp_gas =
+        rgtemp.min * exp(gm1 * entropy) * pow(rho, gm1);
+    CCTK_REAL temp = temp_gas;
+    if (pref > CCTK_REAL(0.0)) {
+      // Radiation-dominated: s ~ 4*pref*T^3/(3*rho)  =>  T = (3*s*rho/(4*pref))^(1/3)
+      const CCTK_REAL temp_rad =
+          cbrt(CCTK_REAL(3.0) * fmax(entropy, CCTK_REAL(0.0)) * rho /
+               (CCTK_REAL(4.0) * pref));
+      // temp_rad underestimates the root once it falls below the temperature
+      // where the gas log term vanishes, T_log = T_0 * rho^gm1 (for s -> 0+
+      // it collapses to 0 and Newton cannot recover within the iteration
+      // cap); the root then lies in [temp_rad, T_log] and temp_gas >= T_log
+      // for s >= 0, so clamping keeps the start within reach of the root.
+      const CCTK_REAL temp_log = rgtemp.min * pow(rho, gm1);
+      temp = fmin(temp_gas, fmax(temp_rad, temp_log));
+    }
+    temp = fmax(temp, CCTK_REAL(1.0e-300)); // keep log() valid
+    for (int n = 0; n < 20; ++n) {
+      const CCTK_REAL t2 = temp * temp;
+      const CCTK_REAL t3 = t2 * temp;
+      const CCTK_REAL f = CCTK_REAL(4.0) * pref * t3 / (CCTK_REAL(3.0) * rho) +
+                          log(temp * pow(rho, -gm1)) / gm1 + entropy_offset -
+                          entropy;
+      const CCTK_REAL df =
+          CCTK_REAL(1.0) / (gm1 * temp) + CCTK_REAL(4.0) * pref * t2 / rho;
+      const CCTK_REAL dtemp = f / df;
+      temp = fmax(temp - dtemp, CCTK_REAL(1.0e-300));
+      if (fabs(dtemp) <= CCTK_REAL(1.0e-12) * fmax(temp, CCTK_REAL(1.0)))
+        break;
+    }
+    return temp;
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL
@@ -252,9 +311,7 @@ public:
   entropy_from_rho_eps_ye(const CCTK_REAL rho, const CCTK_REAL eps,
                           const CCTK_REAL ye) const {
     CCTK_REAL eps_tmp = eps;
-    const CCTK_REAL temp =
-        temp_from_rho_eps_ye_pref(rho, eps_tmp, ye, CCTK_REAL(0.0));
-    return entropy_from_rho_temp_ye_pref(rho, temp, ye, CCTK_REAL(0.0));
+    return entropy_from_rho_eps_ye_pref(rho, eps_tmp, ye, CCTK_REAL(0.0));
   }
 
   CCTK_HOST CCTK_DEVICE CCTK_ATTRIBUTE_ALWAYS_INLINE inline CCTK_REAL

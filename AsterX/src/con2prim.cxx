@@ -33,7 +33,7 @@ enum C2PFlag : CCTK_INT {
   C2P_INIT = 0,    // initial value
   C2P_PRIME = 1,   // first solver succeeded
   C2P_SECOND = 2,  // second solver succeeded
-  C2P_ENTROPY = 3, // 1‑D Entropy (kappa) solver succeeded
+  C2P_ENTROPY = 3, // 1‑D Entropy (evolved entropy) solver succeeded
   C2P_ATMO = 4,    // when (cv.dens <= sqrt_detg * rho_atmo_cut) is true
   C2P_AVG = 5,     // primitives obtained by neighbour‑averaging
   C2P_FAIL = 6     // when C2P fails
@@ -156,8 +156,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
     const auto entropy_from_rho_eps =
         [&](const CCTK_REAL rho_, CCTK_REAL &eps_,
             const CCTK_REAL ye_) ARITH_INLINE {
-	          return eos_kappa_from_rho_eps(eos_3p, rho_, eps_, ye_,
-	                                        rad_pref_local);
+	          return eos_entropy_evolved_from_rho_eps(eos_3p, rho_, eps_, ye_,
+	                                                  rad_pref_local);
         };
     // Note that HydroBaseX gfs are NaN when entering this loop due
     // explicit dependence on conservatives from
@@ -220,8 +220,11 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
       //    std::min(std::max(eos_3p->rgeps.min, eps_atm), eos_3p->rgeps.max);
       press_atm = eos_3p->press_from_rho_eps_ye(rho_atm, eps_atm, Ye_atmo);
     }
-    CCTK_REAL entropy_atm =
-        entropy_from_rho_eps(rho_atm, eps_atm, Ye_atmo);
+    // Atmosphere entropy uses pref = 0: high local optical depth must not
+    // make the atmosphere radiation-dominated (design Q7 invariant).
+    CCTK_REAL eps_atm_tmp = eps_atm;
+    const CCTK_REAL entropy_atm = eos_entropy_evolved_from_rho_eps(
+        eos_3p, rho_atm, eps_atm_tmp, Ye_atmo, CCTK_REAL(0.0));
     const CCTK_REAL rho_atmo_cut = rho_atm * (1 + atmo_tol);
     atmosphere atmo(rho_atm, eps_atm, Ye_atmo, press_atm, temp_atm, entropy_atm,
                     rho_atmo_cut);
@@ -393,7 +396,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
         break;
       }
       case c2p_first_t::Entropy: {
-        c2p_Ent.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo, rep_first);
+        c2p_Ent.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo, rad_pref_local,
+                      rep_first);
         break;
       }
       case c2p_first_t::None: {
@@ -435,7 +439,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
           break;
         }
         case c2p_second_t::Entropy: {
-          c2p_Ent.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo, rep_second);
+          c2p_Ent.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo,
+                        rad_pref_local, rep_second);
           break;
         }
         case c2p_second_t::None: {
@@ -452,7 +457,8 @@ void AsterX_Con2Prim_typeEoS(CCTK_ARGUMENTS, EOSIDType *eos_1p,
         if (use_entropy_fix) {
 
           c2p_flag_code = C2P_ENTROPY;
-          c2p_Ent.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo, rep_ent);
+          c2p_Ent.solve(eos_3p, pv, cv, alp_avg, beta_avg, glo,
+                        rad_pref_local, rep_ent);
 
           if (rep_ent.failed()) {
 
@@ -635,31 +641,31 @@ extern "C" void AsterX_Con2Prim(CCTK_ARGUMENTS) {
   if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
       !(CCTK_EQUALS(c2p_prime, "Noble_rad") ||
         CCTK_EQUALS(c2p_prime, "Palenzuela") ||
+        CCTK_EQUALS(c2p_prime, "Entropy") ||
         CCTK_EQUALS(c2p_second, "Noble_rad") ||
-        CCTK_EQUALS(c2p_second, "Palenzuela"))) {
+        CCTK_EQUALS(c2p_second, "Palenzuela") ||
+        CCTK_EQUALS(c2p_second, "Entropy"))) {
     CCTK_ERROR("Rad_idealgas requires Con2PrimFactory::c2p_prime or "
-               "c2p_second to be \"Noble_rad\" or \"Palenzuela\".");
+               "c2p_second to be \"Noble_rad\", \"Palenzuela\" or "
+               "\"Entropy\".");
   }
   if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
       ((!CCTK_EQUALS(c2p_prime, "Noble_rad") &&
         !CCTK_EQUALS(c2p_prime, "Palenzuela") &&
+        !CCTK_EQUALS(c2p_prime, "Entropy") &&
         !CCTK_EQUALS(c2p_prime, "None")) ||
        (!CCTK_EQUALS(c2p_second, "Noble_rad") &&
         !CCTK_EQUALS(c2p_second, "Palenzuela") &&
+        !CCTK_EQUALS(c2p_second, "Entropy") &&
         !CCTK_EQUALS(c2p_second, "None")))) {
     CCTK_ERROR("Rad_idealgas only supports Con2PrimFactory::Noble_rad, "
-               "Palenzuela (or \"None\") for c2p_prime/c2p_second.");
+               "Palenzuela, Entropy (or \"None\") for c2p_prime/c2p_second.");
   }
   if (!CCTK_EQUALS(evolution_eos, "Rad_idealgas") &&
       (CCTK_EQUALS(c2p_prime, "Noble_rad") ||
        CCTK_EQUALS(c2p_second, "Noble_rad"))) {
     CCTK_ERROR("Con2PrimFactory::Noble_rad requires "
                "EOSX::evolution_eos = \"Rad_idealgas\".");
-  }
-  if (CCTK_EQUALS(evolution_eos, "Rad_idealgas") && use_entropy_fix) {
-    CCTK_ERROR("AsterX::use_entropy_fix is not supported with "
-               "EOSX::evolution_eos = \"Rad_idealgas\" because the entropy "
-               "fallback C2P is not optical-depth aware.");
   }
 
   // defining EOS objects
